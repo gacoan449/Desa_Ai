@@ -1,0 +1,29 @@
+# Flutter
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.idea/
+*.iml
+.vscode/
+
+# Android / secrets
+android/local.properties
+android/key.properties
+**/google-services.json
+**/GoogleService-Info.plist
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+
+# Node
+functions/node_modules/
+functions/.runtimeconfig.json
+firebase-debug.log
+ui-debug.log
