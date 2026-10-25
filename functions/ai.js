@@ -101,6 +101,12 @@ function modelPublic(model, config) {
     outputIdrPer1000: idrForUsd(model.outputUsdPerMillion / 1000000 * 1000, config)
   };
 }
+function reservationAmount(model, plugins, config) {
+  const reserveUsd = (MAX_CONTEXT_TOKENS * model.inputUsdPerMillion +
+    config.maxOutputTokens * model.outputUsdPerMillion) / 1000000 +
+    (plugins.includes("web_search") ? config.webSearchUsdPerCall : 0);
+  return Math.max(config.minBalanceIdr, idrForUsd(reserveUsd, config));
+}
 function estimateTokens(value) {
   // Only a context guard. Final billing always uses token usage returned by the provider.
   return Math.ceil(Buffer.byteLength(String(value || ""), "utf8") / 2.5);
@@ -166,10 +172,7 @@ async function reserveMessage({uid, requestId, roomId, message, modelKey, model,
   const messageRef = room.collection("messages").doc();
   const ledger = db.collection("balance_ledger").doc();
   const mutation = db.collection("mutasi_saldo").doc();
-  const reserveUsd = (MAX_CONTEXT_TOKENS * model.inputUsdPerMillion +
-    config.maxOutputTokens * model.outputUsdPerMillion) / 1000000 +
-    (plugins.includes("web_search") ? config.webSearchUsdPerCall : 0);
-  const reserve = Math.max(config.minBalanceIdr, idrForUsd(reserveUsd, config));
+  const reserve = reservationAmount(model, plugins, config);
   await db.runTransaction(async (tx) => {
     const [userSnap, roomSnap, usageSnap] = await Promise.all([tx.get(userRef), tx.get(room), tx.get(usage)]);
     if (!userSnap.exists || !roomSnap.exists || (roomSnap.data() || {}).deleted === true) throw new HttpsError("not-found", "Akun atau ruang chat tidak ditemukan.");
@@ -266,7 +269,7 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
     if (roomData.activeRequestId === requestId) roomUpdate.activeRequestId = admin.firestore.FieldValue.delete();
     tx.set(room, roomUpdate, {merge: true});
     tx.update(usage, {status: underpayment > 0 ? "SETTLED_NEEDS_REVIEW" : failureStatus, chargedAmountIdr: charge,
-      actualProviderCostUsd: usd, inputTokens, outputTokens, cachedTokens, webSearchCalls: searchCalls,
+      estimatedProviderCostUsd: usd, inputTokens, outputTokens, cachedTokens, webSearchCalls: searchCalls,
       providerResponseId: response && response.id ? response.id : current.providerResponseId || null,
       underpaymentIdr: underpayment, updatedAt: now, completedAt: now,
       reconciliationReason: underpayment ? "Biaya provider melebihi saldo tersedia; perlu peninjauan." : null});
@@ -378,7 +381,7 @@ exports.aiChatStream = onRequest({
     try { decoded = await admin.auth().verifyIdToken(bearer[1], true); }
     catch (_) { return res.status(401).json({message: "Sesi login tidak valid."}); }
     uid = decoded.uid;
-    await activeAccount(uid);
+    const account = await activeAccount(uid);
     const apiKey = OPENAI_API_KEY.value();
     if (!apiKey) return res.status(503).json({message: "OPENAI_API_KEY belum dikonfigurasi di backend."});
 
@@ -394,6 +397,11 @@ exports.aiChatStream = onRequest({
     const config = await pricing();
     const model = config.models[modelKey];
     if (!model || !model.active) return res.status(400).json({message: "Model belum aktif."});
+    const currentBalance = safeInt(account.data.balance);
+    const requiredReserve = reservationAmount(model, plugins, config);
+    if (currentBalance === null || currentBalance < requiredReserve) {
+      return res.status(402).json({message: "Saldo tidak cukup untuk reservasi Rp " + requiredReserve.toLocaleString("id-ID") + ". Top-up atau pilih model hemat."});
+    }
     await limitRequests(uid);
     try {
       if (await moderation(message, apiKey)) return res.status(400).json({message: "Pesan diblokir oleh pemeriksaan keamanan konten."});
