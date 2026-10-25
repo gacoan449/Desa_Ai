@@ -452,7 +452,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 codeblockPadding: const EdgeInsets.all(14),
                 blockquoteDecoration: const BoxDecoration(border: Border(left: BorderSide(color: _green, width: 3))),
                 blockquotePadding: const EdgeInsets.only(left: 12),
-              )))),
+              ))))),
         ])) ));
   }
 
