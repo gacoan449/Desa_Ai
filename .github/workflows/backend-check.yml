@@ -32,7 +32,7 @@ jobs:
           node-version: 20
       - run: npm install --no-audit --no-fund
         working-directory: functions
-      - run: node --check index.js && node --check ai.js && node --check payments.js
+      - run: npm run check
         working-directory: functions
       - run: npm run lint
         working-directory: functions
