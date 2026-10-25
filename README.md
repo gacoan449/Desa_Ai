@@ -23,7 +23,7 @@ Persyaratan: Node.js 20+, Firebase project dengan Authentication dan Firestore a
 4. Dari folder `functions`, jalankan:
 
    ```bash
-   npm ci
+   npm install
    npm run check
    npm start
    ```
