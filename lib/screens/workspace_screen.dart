@@ -72,6 +72,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       final result = await _api.createRoom();
       if (!mounted) return;
       setState(() { _roomId = result['roomId']?.toString(); _page = 'chat'; _modelKey = 'economy'; _plugins = []; _draft = ''; _contextTokens = 0; });
+      if (MediaQuery.sizeOf(context).width < 980) Navigator.of(context).maybePop();
       _input.clear();
       _focus.requestFocus();
     } catch (e) { _notify('Ruang baru gagal dibuat: $e', error: true); }
@@ -279,24 +280,42 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             if (!snapshot.hasData) return const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
             final docs = snapshot.data!.docs.where((d) => d.data()['deleted'] != true).toList();
             if (docs.isEmpty) return const Padding(padding: EdgeInsets.all(20), child: Text('Chat Anda akan tampil di sini.', style: TextStyle(color: _muted, fontSize: 12)));
-            return ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 8), itemCount: docs.length, itemBuilder: (context, i) {
-              final doc = docs[i]; final data = doc.data(); final title = data['title']?.toString() ?? 'Chat baru';
-              final active = _roomId == doc.id && _page == 'chat';
-              return Row(children: [
-                Expanded(child: Material(color: active ? const Color(0xFFEAF4EE) : Colors.transparent, borderRadius: BorderRadius.circular(11),
-                  child: InkWell(borderRadius: BorderRadius.circular(11), onTap: () => _selectRoom(doc.id, data),
-                    child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12), child: Row(children: [
-                      Icon(Icons.chat_bubble_outline_rounded, size: 16, color: active ? _green : _muted), const SizedBox(width: 10),
-                      Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: active ? _ink : const Color(0xFF5D675F), fontWeight: active ? FontWeight.w800 : FontWeight.w500))),
-                    ])))),
-                PopupMenuButton<String>(tooltip: 'Opsi chat', padding: EdgeInsets.zero, iconSize: 18,
-                  onSelected: (v) { if (v == 'rename') _renameRoom(doc.id, title); if (v == 'delete') _deleteRoom(doc.id); },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'rename', child: Row(children: [Icon(Icons.edit_outlined, size: 17), SizedBox(width: 10), Text('Ubah nama')])),
-                    PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 17, color: Color(0xFFB42318)), SizedBox(width: 10), Text('Hapus ruang')])),
-                  ]),
-              ]);
-            });
+            final now = DateTime.now();
+            final today = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+            final yesterday = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+            final week = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+            final older = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+            for (final doc in docs) {
+              final data = doc.data();
+              final stamp = data['updatedAt'] ?? data['createdAt'];
+              final date = stamp is Timestamp ? stamp.toDate() : now;
+              final dateOnly = DateTime(date.year, date.month, date.day);
+              final todayOnly = DateTime(now.year, now.month, now.day);
+              final days = todayOnly.difference(dateOnly).inDays;
+              if (days <= 0) {
+                today.add(doc);
+              } else if (days == 1) {
+                yesterday.add(doc);
+              } else if (days <= 7) {
+                week.add(doc);
+              } else {
+                older.add(doc);
+              }
+            }
+            final children = <Widget>[];
+            void addGroup(String label, List<QueryDocumentSnapshot<Map<String, dynamic>>> group) {
+              if (group.isEmpty) return;
+              children.add(Padding(
+                padding: const EdgeInsets.fromLTRB(13, 12, 10, 5),
+                child: Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF9AA19C))),
+              ));
+              children.addAll(group.map(_roomRow));
+            }
+            addGroup('HARI INI', today);
+            addGroup('KEMARIN', yesterday);
+            addGroup('7 HARI TERAKHIR', week);
+            addGroup('SEBELUMNYA', older);
+            return ListView(padding: const EdgeInsets.symmetric(horizontal: 8), children: children);
           },
         )),
         const Divider(height: 1, color: _line),
@@ -313,11 +332,57 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  Widget _roomRow(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data();
+    final title = data['title']?.toString() ?? 'Chat baru';
+    final active = _roomId == doc.id && _page == 'chat';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        Expanded(child: Material(
+          color: active ? const Color(0xFFEAF4EE) : Colors.transparent,
+          borderRadius: BorderRadius.circular(11),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(11),
+            onTap: () {
+              _selectRoom(doc.id, data);
+              if (MediaQuery.sizeOf(context).width < 980) Navigator.of(context).maybePop();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(children: [
+                Icon(Icons.chat_bubble_outline_rounded, size: 16, color: active ? _green : _muted),
+                const SizedBox(width: 10),
+                Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: active ? _ink : const Color(0xFF5D675F),
+                    fontWeight: active ? FontWeight.w800 : FontWeight.w500))),
+              ]),
+            ),
+          ),
+        )),
+        PopupMenuButton<String>(
+          tooltip: 'Opsi chat', padding: EdgeInsets.zero, iconSize: 18,
+          onSelected: (value) {
+            if (value == 'rename') _renameRoom(doc.id, title);
+            if (value == 'delete') _deleteRoom(doc.id);
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'rename', child: Row(children: [Icon(Icons.edit_outlined, size: 17), SizedBox(width: 10), Text('Ubah nama')])),
+            PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline, size: 17, color: Color(0xFFB42318)), SizedBox(width: 10), Text('Hapus ruang')])),
+          ],
+        ),
+      ]),
+    );
+  }
+
   Widget _nav(IconData icon, String title, String id) {
     final active = _page == id;
     return Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2), child: Material(
       color: active ? const Color(0xFFEAF4EE) : Colors.transparent, borderRadius: BorderRadius.circular(12),
-      child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => setState(() => _page = id),
+      child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () {
+          setState(() => _page = id);
+          if (MediaQuery.sizeOf(context).width < 980) Navigator.of(context).maybePop();
+        },
         child: Padding(padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12), child: Row(children: [
           Icon(icon, color: active ? _green : const Color(0xFF657069), size: 19), const SizedBox(width: 12),
           Text(title, style: TextStyle(fontWeight: active ? FontWeight.w800 : FontWeight.w600, fontSize: 13, color: active ? _ink : const Color(0xFF66716A))),
