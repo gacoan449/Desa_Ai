@@ -65,7 +65,7 @@ class AiService {
     if (user == null) throw StateError('Sesi login habis. Silakan masuk kembali.');
     final token = await user.getIdToken();
     final projectId = Firebase.app().options.projectId;
-    if (projectId == null || projectId.isEmpty) {
+    if (projectId.isEmpty) {
       throw StateError('Firebase project ID belum tersedia. Jalankan flutterfire configure.');
     }
 
