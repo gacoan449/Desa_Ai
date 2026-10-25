@@ -53,11 +53,14 @@ Estimasi karakter hanya boleh menjadi batas awal. Penagihan final harus mengguna
 ## Status penggunaan
 
 - RESERVED: saldo ditahan, request belum selesai.
-- PENDING_RECONCILIATION: usage belum diketahui. Reserve tetap ditahan.
+- PENDING_RECONCILIATION: usage belum diketahui. Reserve tetap ditahan dan ruang yang sama tetap terkunci agar pengguna tidak mengulang request yang berpotensi diproses provider dua kali.
 - SETTLED: usage tercatat dan sisa reserve dikembalikan.
 - SETTLED_WITH_ERROR: provider melaporkan usage, tetapi output mengalami kegagalan.
 - SETTLED_NEEDS_REVIEW: biaya melebihi reserve dan saldo tambahan tidak mencukupi.
 - FAILED: provider menolak sebelum generasi dan reserve dikembalikan.
+- REFUNDED_AFTER_MANUAL_REVIEW: admin memverifikasi melalui dashboard/log provider bahwa request tanpa response ID tidak ditagih, lalu mengembalikan reserve dalam transaksi atomik. Alasan audit wajib dicatat.
+
+Fungsi admin `aiAdminListPendingUsage` menyajikan antrean pending dan settlement yang membutuhkan review. Fungsi `aiAdminRefundUnconfirmedUsage` hanya mengizinkan pengembalian manual untuk request pending yang **tidak memiliki response ID**, setelah operator melakukan verifikasi terpisah pada provider. Jangan gunakan untuk menghapus antrean secara otomatis.
 
 Transisi terminal tidak boleh mengkredit atau mendebit ulang. Request id unik per user mengurangi risiko duplikasi.
 
