@@ -347,7 +347,7 @@ exports.aiDeleteRoom = onCall({region: REGION}, async (request) => {
   if (!snap.exists) return {success: true};
   if ((snap.data() || {}).activeRequestId) throw new HttpsError("failed-precondition", "Tunggu jawaban selesai sebelum menghapus ruang.");
   let removed = 0;
-  while (true) {
+  while (removed <= 20000) {
     const page = await ref.collection("messages").limit(400).get();
     if (page.empty) break;
     const batch = db.batch();
