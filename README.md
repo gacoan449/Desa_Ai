@@ -1,131 +1,80 @@
 # Desa AI
 
-AI workspace dengan saldo rupiah per pemakaian — aplikasi Flutter + Firebase Functions untuk pengguna Indonesia. Layout memiliki sidebar riwayat, tombol chat baru, pemilih model, respons streaming, katalog plugin, ringkasan saldo, dan top-up.
+Aplikasi Flutter ruang obrolan AI dengan login Google saja, riwayat chat, pilihan model, plugin, saldo rupiah, dan top-up TriPay. Backend berjalan sebagai **Node.js + Express API di server/VPS**, bukan Firebase Cloud Functions. Firebase tetap dipakai untuk Authentication dan Cloud Firestore; API memakai Firebase Admin SDK untuk memverifikasi token dan mengakses data.
 
-> Status: source aplikasi dan backend telah dimasukkan ke branch main. Belum siap produksi sebelum konfigurasi Firebase/provider, pengujian merchant sandbox, dan build Android dilakukan.
+> **Status:** source dan CI sedang diperbaiki. Sebelum dipakai pengguna nyata, wajib memasukkan konfigurasi Firebase yang valid, men-deploy backend Express ke server HTTPS, mengatur secret, dan menguji OpenAI serta TriPay sandbox. Jangan anggap layanan sudah aktif hanya karena APK berhasil dibangun.
 
-## Fitur dalam source
+## Komponen
 
-- Email/password dan Google Sign-In melalui Firebase Authentication.
-- Workspace responsif dengan daftar ruang chat, ubah nama, hapus, dan chat baru.
-- Pemilih model GPT-6.1 Sol (premium) dan GPT-6 Luna (hemat); model ID dan tarif dapat dioverride di backend.
-- Streaming Responses API melalui Server-Sent Events.
-- Reservasi saldo sebelum permintaan, settlement berdasarkan usage provider, ledger dan penanganan hasil tidak pasti.
-- Rate limit 5 permintaan per 10 detik, moderasi sebelum generasi, context guard 30.000 token perkiraan dan warning 25.000.
-- Plugin browsing web; plugin cek resi, pembanding e-commerce, dan gambar dinyatakan belum aktif sampai integrasi resminya siap.
-- Top-up Rp10.000, Rp25.000, Rp50.000, Rp100.000 dengan channel aktif dari merchant TriPay.
-- Callback TriPay memvalidasi HMAC raw body, invoice/nominal, dan mencegah kredit ganda.
+- Flutter Android client.
+- Firebase Authentication dengan **Google Sign-In sebagai satu-satunya metode login**.
+- Cloud Firestore untuk profil, riwayat, ledger dan transaksi.
+- Node.js/Express backend di folder `functions/` (folder dipertahankan untuk migrasi historis; proses ini **tidak** menggunakan Firebase Functions).
+- OpenAI Responses API melalui backend; API key tidak pernah dimasukkan ke APK.
+- TriPay untuk invoice top-up dan callback bertanda tangan.
 
-## Peta arsitektur
+## Menjalankan backend di VPS
 
-~~~text
-Flutter client
-  ├─ Firebase Auth (email/password + Google)
-  ├─ Chat workspace, history, plugin store, wallet
-  └─ Firebase ID token
-       ├─ aiChatStream (SSE)
-       │    ├─ cek akun aktif dan rate limit
-       │    ├─ moderasi
-       │    ├─ reservasi saldo atomik
-       │    ├─ OpenAI Responses API
-       │    └─ settlement token, ledger, rekonsiliasi
-       ├─ aiCreateRoom / aiRenameRoom / aiDeleteRoom
-       └─ aiCreateTopupPayment
-             └─ TriPay API → aiTripayCallback → kredit atomik
-~~~
+Persyaratan: Node.js 20+, Firebase project dengan Authentication dan Firestore aktif, akun service untuk Firebase Admin SDK, OpenAI API key, dan kredensial TriPay sandbox.
 
-Region Cloud Functions: asia-southeast2 (Jakarta). Secret provider hanya disimpan di Firebase Functions secrets; jangan pernah membundelnya ke APK.
+1. Buat service account dengan izin minimum yang diperlukan untuk Authentication/Firestore. Simpan JSON di luar repository; jangan pernah commit file tersebut.
+2. Salin `functions/.env.example` menjadi `functions/.env`, lalu isi nilai di environment server/secret manager. Jangan commit `.env`.
+3. Atur `GOOGLE_APPLICATION_CREDENTIALS` ke lokasi service-account JSON dan `GOOGLE_CLOUD_PROJECT` ke project Firebase yang benar.
+4. Dari folder `functions`, jalankan:
 
-## 1. Prasyarat
+   ```bash
+   npm ci
+   npm run check
+   npm start
+   ```
 
-- Flutter SDK kompatibel Dart 3.5+.
-- Node.js 20 dan Firebase CLI.
-- Project Firebase dengan Authentication, Cloud Firestore, dan Cloud Functions. Billing plan Firebase yang sesuai mungkin diperlukan untuk fungsi terjadwal.
-- OpenAI API key yang memiliki akses ke model yang dikonfigurasi.
-- Akun merchant TriPay dan kredensial sandbox.
+5. Pasang reverse proxy HTTPS (misalnya Nginx/Caddy) di depan port 8080. Set `PUBLIC_API_BASE_URL` ke URL HTTPS publik tersebut.
+6. Batasi `ALLOWED_ORIGINS` ke origin web yang benar jika web client digunakan. Untuk Android native, request tidak membutuhkan browser origin.
+7. Jalankan `POST /_internal/reconcile` melalui cron setiap 10 menit dengan header `Authorization: Bearer <CRON_SECRET>`. Jangan buka secret cron ke aplikasi.
+8. Daftarkan URL `https://API-ANDA/aiTripayCallback` pada pengaturan callback merchant jika dashboard TriPay memerlukannya. Backend juga mengirim URL callback itu saat membuat invoice.
 
-## 2. Siapkan platform Android/Web
+Variabel server wajib: `OPENAI_API_KEY`, `TRIPAY_API_KEY`, `TRIPAY_MERCHANT_CODE`, `TRIPAY_PRIVATE_KEY`, `PUBLIC_API_BASE_URL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`, dan `CRON_SECRET`. `TRIPAY_SANDBOX` default-nya `true`. Jangan beralih ke transaksi nyata sebelum tes sandbox lulus.
 
-Repository berisi source inti, belum berisi direktori platform native hasil generator Flutter. Untuk membuatnya tanpa menimpa source aplikasi:
+## Konfigurasi Firebase dan Google login
 
-1. Di direktori sementara, jalankan: flutter create --platforms android,web --project-name desa_ai desa_ai_platforms
-2. Salin folder android/ dan web/ dari scaffold tersebut ke root repo ini.
-3. Jalankan flutter pub get.
-4. Aktifkan provider Email/Password dan Google di Firebase Authentication.
-5. Jalankan dart pub global activate flutterfire_cli, lalu flutterfire configure --project PROJECT_ID untuk mengikat project Firebase.
+1. Aktifkan Google provider di Firebase Authentication.
+2. Daftarkan aplikasi Android dengan package name yang sesuai dan konfigurasi SHA-1/SHA-256 yang benar.
+3. Jalankan FlutterFire CLI hanya untuk membuat konfigurasi client Firebase (bukan untuk deploy Functions): `flutterfire configure --project PROJECT_ID`.
+4. Untuk menjalankan aplikasi, berikan URL server API:
 
-Google Sign-In memerlukan konfigurasi OAuth dan SHA-1/SHA-256 sesuai platform. OTP WhatsApp belum diaktifkan karena perlu provider OTP WhatsApp resmi; jangan menyatakan berhasil sebelum integrasi itu dibuat.
+   ```bash
+   flutter pub get
+   flutter run --dart-define=DESA_AI_API_URL=https://api.domain-anda
+   flutter build apk --release --dart-define=DESA_AI_API_URL=https://api.domain-anda
+   ```
 
-## 3. Rahasia backend
+   Jangan masukkan secret OpenAI, TriPay, service-account JSON, atau CRON_SECRET ke `--dart-define`.
 
-Pilih project Firebase lalu set secret lewat Firebase CLI:
+Login menampilkan satu tombol Google. Nama dan foto profil berasal dari profil Google; tidak ada form nama, email, atau kata sandi manual.
 
-~~~bash
-firebase login
-firebase use --add
-firebase functions:secrets:set OPENAI_API_KEY
-firebase functions:secrets:set TRIPAY_API_KEY
-firebase functions:secrets:set TRIPAY_MERCHANT_CODE
-firebase functions:secrets:set TRIPAY_PRIVATE_KEY
-~~~
+## Endpoint API
 
-Masukkan secret secara interaktif di CLI. Jangan letakkan nilainya di repository, log, atau APK. TRIPAY_SANDBOX default-nya true. Uji sandbox sebelum beralih ke production.
+- `POST /aiGetConfig`
+- `POST /aiCreateRoom`, `/aiRenameRoom`, `/aiDeleteRoom`
+- `POST /aiChatStream` (Server-Sent Events)
+- `POST /aiGetPaymentChannels`, `/aiCreateTopupPayment`
+- `POST /aiTripayCallback` (callback provider; validasi signature)
+- `POST /_internal/reconcile` (hanya cron dengan secret)
+- `GET /healthz`
 
-~~~bash
-cd functions
-npm install
-npm run lint
-cd ..
-firebase deploy --only functions,firestore:rules
-~~~
+Endpoint pengguna selain callback memerlukan header `Authorization: Bearer <Firebase ID token>`. Jangan membuka port backend langsung tanpa TLS/reverse proxy dan aturan firewall. Gunakan akun admin terpisah untuk endpoint admin; backend tetap memvalidasi role.
 
-Endpoint callback yang didaftarkan pada merchant (bila diperlukan):
-https://asia-southeast2-PROJECT_ID.cloudfunctions.net/aiTripayCallback
+## Pengamanan transaksi
 
-Create invoice juga mengirim callback URL. Pastikan project ID dan URL produksi sesuai dengan project Firebase Anda.
+- Backend memeriksa status akun, saldo dan rate limit.
+- Reservasi saldo dibuat sebelum pemanggilan provider; settlement mengikuti usage yang diterima dari provider.
+- Hasil provider yang tidak pasti tetap pending sampai rekonsiliasi atau tinjauan admin; jangan refund otomatis jika provider mungkin sudah memproses permintaan.
+- Callback TriPay memvalidasi HMAC raw body, referensi dan nominal; kredit top-up harus idempoten.
+- Client tidak boleh menulis balance, ledger, pesan, usage, atau transaksi secara langsung.
+- Estimasi konteks merupakan guardrail ukuran teks, bukan tokenizer presisi. Tarif dan akses model harus diverifikasi terhadap akun API aktual sebelum peluncuran.
 
-## 4. Harga model dan saldo
+## CI
 
-Backend membaca konfigurasi override dari dokumen Firestore settings/ai_pricing:
+GitHub Actions menjalankan Flutter analyze, membuat scaffold Android saat job berlangsung lalu membangun APK debug, serta menjalankan pemeriksaan sintaks dan lint backend. Scaffold Android yang dibuat oleh CI tidak otomatis menjadi file native yang tersimpan di repository. Untuk build lokal/release yang dapat direproduksi, buat dan commit folder platform Android setelah memeriksa package ID dan konfigurasi signing.
 
-- fxIdrPerUsd: kurs konversi USD ke rupiah yang ditetapkan bisnis.
-- retailMultiplier: margin di atas biaya provider.
-- models.premium.id, inputUsdPerMillion, outputUsdPerMillion, cachedInputUsdPerMillion, active.
-- models.economy.* dengan properti serupa.
-- maxOutputTokens, minBalanceIdr, dan webSearchUsdPerCall.
-
-Default yang disetel sekarang memakai harga Standard per 1 juta token dari halaman harga OpenAI yang diperiksa 25 Oktober 2026: GPT-6.1 Sol input $2, output $10, cached input $0.10; GPT-6 Luna input $0.10, output $0.50, cached input $0.01. Tarif aplikasi kemudian dikalikan kurs dan retailMultiplier. Ini adalah nilai awal, bukan kontrak harga tetap. Harga bisa berbeda menurut tier pemrosesan, ukuran konteks, cache write, tools, dan program harga. Verifikasi bahwa model ID tersedia di project API Anda dan sesuaikan konfigurasi server sebelum membuka transaksi nyata. Referensi resmi: https://developers.openai.com/api/docs/models dan https://developers.openai.com/api/docs/pricing.
-
-Estimasi konteks saat ini adalah guardrail ukuran UTF-8, bukan tokenizer tiktoken yang presisi. Settlement membaca usage.input_tokens, usage.output_tokens, dan cached-token count dari provider. Biaya cache-write/tool belum dipisah sempurna dari usage token pada versi awal; retailMultiplier memberikan bantalan biaya, tetapi angka stored sebagai estimated provider cost tetap estimasi. Jangan menampilkan angka tersebut sebagai bukti invoice provider. Frontend tidak menentukan tagihan final.
-
-## 5. Prinsip transaksi
-
-1. Backend memeriksa akun aktif dan rate limit.
-2. Moderasi berjalan sebelum model; jika layanan moderasi gagal, request ditolak.
-3. Reservasi saldo dan ledger dibuat dalam transaksi Firestore sebelum panggilan provider.
-4. Setelah usage provider diterima, backend menghitung biaya dan mengembalikan sisa reservasi.
-5. Jika status pemrosesan belum pasti, reservasi ditahan, ruang chat tetap terkunci, dan request ditandai untuk rekonsiliasi. Job berkala menyelesaikan record yang memiliki provider response ID; record tanpa ID masuk antrean admin. Jangan refund otomatis untuk request yang mungkin sudah diproses provider. Refund manual hanya tersedia untuk admin setelah verifikasi terpisah bahwa provider tidak menagih; pemanggil wajib mengirim konfirmasi eksplisit `providerVerifiedNoCharge: true` bersama alasan audit. Ini adalah pengakuan operator, bukan bukti otomatis dari provider; semua tindakan masuk ledger.
-6. Callback TriPay harus memiliki signature yang valid, reference cocok, total sesuai invoice, dan status yang diizinkan. Kredit memakai jumlah paket (creditAmount), bukan fee.
-7. Client tidak boleh menulis balance, ledger, pesan, penggunaan, atau catatan pembayaran.
-
-## 6. Jalankan UI
-
-Setelah platform dan Firebase disiapkan:
-
-~~~bash
-flutter pub get
-flutter run
-flutter build apk --release
-~~~
-
-## Batasan sebelum public launch
-
-- Flutter analyze, build APK dan tes end-to-end belum dijalankan di lingkungan pengerjaan ini.
-- Backend belum diuji dengan secret/OpenAI API key dan merchant sandbox nyata.
-- Cek resi, pencarian e-commerce, dan generator gambar masih nonaktif.
-- Google Sign-In perlu konfigurasi OAuth platform yang sesuai.
-- Prompt caching tidak menjamin hit rate atau persentase diskon tertentu; tagihan provider mengikuti usage aktual.
-- Rekonsiliasi otomatis dapat menangani respons yang memiliki response ID. Status tidak pasti tanpa response ID perlu peninjauan operasional.
-- Tinjau harga provider, kurs FX, multiplier, model access, rules, CORS, privacy retention, budget/alerts dan proses refund sebelum rilis.
-
-Lihat docs/BLUEPRINT.md untuk roadmap dan kriteria penerimaan.
+Lihat `docs/RELEASE_CHECKLIST.md` sebelum rilis.
