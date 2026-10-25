@@ -60,6 +60,11 @@ async function activeAccount(uid) {
   if (isDisabled(data)) throw new HttpsError("permission-denied", "Akun sedang dinonaktifkan.");
   return {ref, data};
 }
+async function requireAdmin(uid) {
+  const account = await activeAccount(uid);
+  if (account.data.role !== "admin") throw new HttpsError("permission-denied", "Akses hanya untuk admin.");
+  return account;
+}
 async function pricing() {
   const snap = await db.collection("settings").doc("ai_pricing").get();
   const saved = snap.exists ? (snap.data() || {}) : {};
@@ -279,7 +284,7 @@ async function markPending(uid, requestId, responseId, reason, partial = "") {
   const batch = db.batch();
   batch.set(usage, {status: "PENDING_RECONCILIATION", providerResponseId: responseId || current.providerResponseId || null,
     partialText: text(partial, 30000), reconciliationReason: text(reason, 500), updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-  batch.set(roomRef(uid, current.roomId), {activeRequestId: admin.firestore.FieldValue.delete(), updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+  // Keep the room locked until usage is reconciled or an admin verifies a no-charge outcome.
   await batch.commit();
 }
 
@@ -495,6 +500,87 @@ exports.aiChatStream = onRequest({
       "resource-exhausted": 429, "failed-precondition": 402, "already-exists": 409 }[err.code]) || 500)
       .json({message: err.message || "Permintaan AI gagal."});
   }
+});
+
+exports.aiAdminListPendingUsage = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const adminUid = requireUid(request);
+  await requireAdmin(adminUid);
+  const [pendingSnap, reviewSnap] = await Promise.all([
+    db.collection("ai_usage_ledger").where("status", "==", "PENDING_RECONCILIATION").limit(100).get(),
+    db.collection("ai_usage_ledger").where("status", "==", "SETTLED_NEEDS_REVIEW").limit(100).get()
+  ]);
+  const summarize = (doc) => {
+    const item = doc.data() || {};
+    const time = item.updatedAt && typeof item.updatedAt.toMillis === "function" ? item.updatedAt.toMillis() : null;
+    return {
+      uid: text(item.uid, 128), requestId: text(item.requestId, 80), roomId: text(item.roomId, 128),
+      status: text(item.status, 60), model: text(item.model, 100),
+      reservedAmountIdr: safeInt(item.reservedAmountIdr) || 0,
+      chargedAmountIdr: safeInt(item.chargedAmountIdr),
+      underpaymentIdr: safeInt(item.underpaymentIdr) || 0,
+      providerResponseId: text(item.providerResponseId, 200),
+      reconciliationReason: text(item.reconciliationReason, 500),
+      updatedAtMillis: time
+    };
+  };
+  return {
+    pending: pendingSnap.docs.map(summarize),
+    needsReview: reviewSnap.docs.map(summarize)
+  };
+});
+
+exports.aiAdminRefundUnconfirmedUsage = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const adminUid = requireUid(request);
+  await requireAdmin(adminUid);
+  const uid = text(request.data && request.data.uid, 128);
+  const requestId = text(request.data && request.data.requestId, 80);
+  const reason = text(request.data && request.data.reason, 500);
+  if (!uid || !/^[A-Za-z0-9_-]{16,80}$/.test(requestId) || reason.length < 20) {
+    throw new HttpsError("invalid-argument", "UID, request ID, dan alasan audit minimal 20 karakter wajib diisi.");
+  }
+
+  const usage = usageRef(uid, requestId);
+  const userRef = db.collection("users").doc(uid);
+  const ledgerId = "ai_manual_refund_" + crypto.createHash("sha256").update(uid + ":" + requestId).digest("hex");
+  const ledgerRef = db.collection("balance_ledger").doc(ledgerId);
+  const mutationRef = db.collection("mutasi_saldo").doc(ledgerId);
+
+  return db.runTransaction(async (tx) => {
+    const usageSnap = await tx.get(usage);
+    if (!usageSnap.exists) throw new HttpsError("not-found", "Catatan pemakaian tidak ditemukan.");
+    const item = usageSnap.data() || {};
+    if (item.status === "REFUNDED_AFTER_MANUAL_REVIEW") return {success: true, alreadyResolved: true};
+    if (item.status !== "PENDING_RECONCILIATION" || item.providerResponseId) {
+      throw new HttpsError("failed-precondition", "Hanya request pending tanpa provider response ID yang boleh direfund lewat prosedur manual.");
+    }
+    const [userSnap, roomSnap, ledgerSnap] = await Promise.all([
+      tx.get(userRef),
+      tx.get(roomRef(uid, item.roomId)),
+      tx.get(ledgerRef)
+    ]);
+    if (!userSnap.exists) throw new HttpsError("not-found", "Profil pengguna tidak ditemukan.");
+    if (ledgerSnap.exists) throw new HttpsError("already-exists", "Ledger refund sudah tercatat; periksa status pemakaian.");
+    const before = safeInt((userSnap.data() || {}).balance);
+    const reserved = safeInt(item.reservedAmountIdr);
+    if (before === null || before < 0 || reserved === null || reserved <= 0 || !Number.isSafeInteger(before + reserved)) {
+      throw new HttpsError("failed-precondition", "Saldo atau nominal reservasi tidak valid.");
+    }
+    const after = before + reserved;
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.update(userRef, {balance: after, updatedAt: now});
+    tx.create(ledgerRef, {uid, type: "CREDIT", amount: reserved, before, after,
+      reason: "Refund AI setelah verifikasi manual tanpa charge provider", source: "AI_MANUAL_REVIEW_REFUND",
+      requestId, roomId: item.roomId, model: item.model, reviewedBy: adminUid, reviewReason: reason, createdAt: now});
+    tx.create(mutationRef, {uid, tipe: "MASUK", nominal: reserved, saldoAwal: before, saldoAkhir: after,
+      keterangan: "Refund pemakaian AI hasil verifikasi manual", sumber: "AI_MANUAL_REVIEW_REFUND",
+      transactionId: requestId, roomId: item.roomId, reviewedBy: adminUid, reviewReason: reason, waktu: now});
+    tx.update(usage, {status: "REFUNDED_AFTER_MANUAL_REVIEW", chargedAmountIdr: 0, manualRefundAmountIdr: reserved,
+      manualReviewedBy: adminUid, manualReviewReason: reason, updatedAt: now, completedAt: now});
+    if (roomSnap.exists && (roomSnap.data() || {}).activeRequestId === requestId) {
+      tx.update(roomRef(uid, item.roomId), {activeRequestId: admin.firestore.FieldValue.delete(), updatedAt: now});
+    }
+    return {success: true, amountRefundedIdr: reserved, remainingBalanceIdr: after};
+  });
 });
 
 exports.aiReconcilePending = onSchedule({
