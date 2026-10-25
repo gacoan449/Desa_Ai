@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function admin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+    function disabled(data) {
+      return data.disabled == true || data.isDisabled == true || data.isBlocked == true
+        || data.isActive == false || data.status in ["disabled", "inactive", "blocked", "banned", "suspended", "nonaktif", "diblokir"];
+    }
+
+    match /users/{uid} {
+      allow read: if owner(uid) || admin();
+      allow create: if owner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.balance == 0
+        && request.resource.data.role == "user"
+        && request.resource.data.keys().hasOnly(["uid", "name", "displayName", "email", "phone", "balance", "role", "status", "createdAt", "updatedAt", "photoUrl"]);
+      allow update: if admin() || (owner(uid)
+        && !disabled(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name", "displayName", "email", "phone", "photoUrl", "updatedAt"]));
+      allow delete: if admin();
+    }
+
+    // Server-authoritative AI records: users can read only their own data.
+    match /ai_users/{uid} {
+      allow read: if owner(uid);
+      allow write: if false;
+      match /rooms/{roomId} {
+        allow read: if owner(uid);
+        allow write: if false;
+        match /messages/{messageId} {
+          allow read: if owner(uid);
+          allow write: if false;
+        }
+      }
+    }
+    match /ai_usage_ledger/{id} {
+      allow read: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /balance_ledger/{id} {
+      allow read: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /mutasi_saldo/{id} {
+      allow read: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /topup_transactions/{id} {
+      allow read: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /ai_rate_limits/{uid} {
+      allow read, write: if false;
+    }
+    match /settings/{id} {
+      allow read: if admin();
+      allow write: if admin();
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
