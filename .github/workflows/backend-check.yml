@@ -17,6 +17,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+      - run: flutter create --platforms=android --project-name desa_ai .
       - run: flutter pub get
       - run: flutter analyze --no-pub
       - run: flutter build apk --debug
