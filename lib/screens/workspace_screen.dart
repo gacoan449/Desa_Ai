@@ -594,7 +594,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             Switch(value: available && _plugins.contains(id), onChanged: available ? (value) {
               setState(() { if (value) { if (!_plugins.contains(id)) _plugins.add(id); } else { _plugins.remove(id); } });
               _notify(value ? 'Browsing ditambahkan untuk pesan berikutnya.' : 'Browsing dinonaktifkan.');
-            } : null, activeColor: _green),
+            } : null, activeThumbColor: _green),
           ]),
         );
       }),
