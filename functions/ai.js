@@ -543,8 +543,9 @@ exports.aiAdminRefundUnconfirmedUsage = onCall({region: REGION, maxInstances: 3}
   const uid = text(request.data && request.data.uid, 128);
   const requestId = text(request.data && request.data.requestId, 80);
   const reason = text(request.data && request.data.reason, 500);
-  if (!uid || !/^[A-Za-z0-9_-]{16,80}$/.test(requestId) || reason.length < 20) {
-    throw new HttpsError("invalid-argument", "UID, request ID, dan alasan audit minimal 20 karakter wajib diisi.");
+  const providerVerifiedNoCharge = request.data && request.data.providerVerifiedNoCharge === true;
+  if (!uid || !/^[A-Za-z0-9_-]{16,80}$/.test(requestId) || reason.length < 20 || !providerVerifiedNoCharge) {
+    throw new HttpsError("invalid-argument", "UID, request ID, alasan audit minimal 20 karakter, dan konfirmasi verifikasi tanpa biaya wajib diisi.");
   }
 
   const usage = usageRef(uid, requestId);
@@ -558,8 +559,8 @@ exports.aiAdminRefundUnconfirmedUsage = onCall({region: REGION, maxInstances: 3}
     if (!usageSnap.exists) throw new HttpsError("not-found", "Catatan pemakaian tidak ditemukan.");
     const item = usageSnap.data() || {};
     if (item.status === "REFUNDED_AFTER_MANUAL_REVIEW") return {success: true, alreadyResolved: true};
-    if (item.status !== "PENDING_RECONCILIATION" || item.providerResponseId) {
-      throw new HttpsError("failed-precondition", "Hanya request pending tanpa provider response ID yang boleh direfund lewat prosedur manual.");
+    if (item.status !== "PENDING_RECONCILIATION") {
+      throw new HttpsError("failed-precondition", "Hanya request pending yang boleh direfund lewat prosedur manual.");
     }
     const [userSnap, roomSnap, ledgerSnap] = await Promise.all([
       tx.get(userRef),
