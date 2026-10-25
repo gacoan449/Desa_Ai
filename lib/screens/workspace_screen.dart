@@ -621,6 +621,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.45)),
             ]),
           ),
+          const SizedBox(height: 14),
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance.collection('ai_users').doc(_user!.uid).snapshots(),
+            builder: (context, usageSnapshot) {
+              final totalTokens = (usageSnapshot.data?.data()?['totalTokens'] as num?)?.toInt() ?? 0;
+              return Container(
+                padding: const EdgeInsets.all(17),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: _line)),
+                child: Row(children: [
+                  Container(width: 42, height: 42, decoration: BoxDecoration(color: const Color(0xFFEAF0FF), borderRadius: BorderRadius.circular(13)),
+                    child: const Icon(Icons.data_usage_rounded, color: Color(0xFF4D63A8), size: 21)),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Total token digunakan', style: TextStyle(fontSize: 12, color: _muted, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 3),
+                    Text(NumberFormat.decimalPattern('id_ID').format(totalTokens),
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _ink)),
+                  ])),
+                ]),
+              );
+            },
+          ),
           const SizedBox(height: 25), const Text('Pilih paket top-up', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)), const SizedBox(height: 12),
           GridView.count(crossAxisCount: MediaQuery.sizeOf(context).width > 720 ? 4 : 2, shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.35,
