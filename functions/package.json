@@ -1,17 +1,20 @@
 {
-  "name": "desa-ai-functions",
+  "name": "desa-ai-api",
   "private": true,
   "version": "1.0.0",
   "main": "index.js",
-  "engines": { "node": "20" },
+  "engines": {
+    "node": "20"
+  },
   "scripts": {
+    "start": "node server.js",
     "lint": "eslint .",
-    "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "check": "node --check index.js && node --check server.js && node --check runtime.js && node --check ai.js && node --check payments.js"
   },
   "dependencies": {
-    "firebase-admin": "13.10.0",
-    "firebase-functions": "6.6.0"
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "firebase-admin": "13.10.0"
   },
   "devDependencies": {
     "eslint": "8.57.1",
