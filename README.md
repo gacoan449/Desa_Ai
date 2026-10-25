@@ -94,9 +94,9 @@ Backend membaca konfigurasi override dari dokumen Firestore settings/ai_pricing:
 - models.economy.* dengan properti serupa.
 - maxOutputTokens, minBalanceIdr, dan webSearchUsdPerCall.
 
-Nilai awal wajib ditinjau sebelum transaksi nyata. Harga dapat berbeda menurut tier pemrosesan, panjang konteks, tools, atau program harga. Model ID juga harus benar-benar tersedia untuk project API Anda. Referensi: https://platform.openai.com/docs/models dan https://platform.openai.com/pricing.
+Default yang disetel sekarang memakai harga Standard per 1 juta token dari halaman harga OpenAI yang diperiksa 25 Oktober 2026: GPT-6.1 Sol input $2, output $10, cached input $0.10; GPT-6 Luna input $0.10, output $0.50, cached input $0.01. Tarif aplikasi kemudian dikalikan kurs dan retailMultiplier. Ini adalah nilai awal, bukan kontrak harga tetap. Harga bisa berbeda menurut tier pemrosesan, ukuran konteks, cache write, tools, dan program harga. Verifikasi bahwa model ID tersedia di project API Anda dan sesuaikan konfigurasi server sebelum membuka transaksi nyata. Referensi resmi: https://developers.openai.com/api/docs/models dan https://developers.openai.com/api/docs/pricing.
 
-Estimasi konteks sekarang adalah guardrail ukuran UTF-8, bukan tokenizer tiktoken yang presisi. Tagihan akhir memakai usage.input_tokens, usage.output_tokens, dan usage.input_tokens_details.cached_tokens dari provider. Frontend tidak menentukan tagihan final.
+Estimasi konteks saat ini adalah guardrail ukuran UTF-8, bukan tokenizer tiktoken yang presisi. Settlement membaca usage.input_tokens, usage.output_tokens, dan cached-token count dari provider. Biaya cache-write/tool belum dipisah sempurna dari usage token pada versi awal; retailMultiplier memberikan bantalan biaya, tetapi angka stored sebagai estimated provider cost tetap estimasi. Jangan menampilkan angka tersebut sebagai bukti invoice provider. Frontend tidak menentukan tagihan final.
 
 ## 5. Prinsip transaksi
 
