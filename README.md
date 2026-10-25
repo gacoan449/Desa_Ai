@@ -104,7 +104,7 @@ Estimasi konteks saat ini adalah guardrail ukuran UTF-8, bukan tokenizer tiktoke
 2. Moderasi berjalan sebelum model; jika layanan moderasi gagal, request ditolak.
 3. Reservasi saldo dan ledger dibuat dalam transaksi Firestore sebelum panggilan provider.
 4. Setelah usage provider diterima, backend menghitung biaya dan mengembalikan sisa reservasi.
-5. Jika status pemrosesan belum pasti, reservasi ditahan dan ditandai untuk rekonsiliasi. Jangan refund otomatis untuk request yang mungkin sudah diproses provider.
+5. Jika status pemrosesan belum pasti, reservasi ditahan, ruang chat tetap terkunci, dan request ditandai untuk rekonsiliasi. Job berkala menyelesaikan record yang memiliki provider response ID; record tanpa ID masuk antrean admin. Jangan refund otomatis untuk request yang mungkin sudah diproses provider. Refund manual hanya tersedia untuk admin setelah verifikasi terpisah bahwa provider tidak menagih; semua tindakan masuk ledger dan audit reason.
 6. Callback TriPay harus memiliki signature yang valid, reference cocok, total sesuai invoice, dan status yang diizinkan. Kredit memakai jumlah paket (creditAmount), bukan fee.
 7. Client tidak boleh menulis balance, ledger, pesan, penggunaan, atau catatan pembayaran.
 
