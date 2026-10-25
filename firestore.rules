@@ -20,9 +20,17 @@ service cloud.firestore {
         && request.resource.data.balance == 0
         && request.resource.data.role == "user"
         && request.resource.data.keys().hasOnly(["uid", "name", "displayName", "email", "phone", "balance", "role", "status", "createdAt", "updatedAt", "photoUrl"]);
-      allow update: if admin() || (owner(uid)
-        && !disabled(resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name", "displayName", "email", "phone", "photoUrl", "updatedAt"]));
+      // Admin access to profiles must never include direct balance writes from a client.
+      allow update: if (admin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name", "displayName", "email", "phone", "photoUrl", "updatedAt",
+          "status", "disabled", "isDisabled", "isBlocked", "isActive", "role"
+        ]))
+        || (owner(uid)
+          && !disabled(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "name", "displayName", "email", "phone", "photoUrl", "updatedAt"
+          ]));
       allow delete: if admin();
     }
 
