@@ -18,11 +18,11 @@ const MIN_BALANCE_IDR = 500;
 const DEFAULT_MODELS = {
   premium: {
     key: "premium", id: "gpt-6.1-sol", name: "GPT-6.1 Sol",
-    mode: "premium", inputUsdPerMillion: 1, outputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.05, active: true
+    mode: "premium", inputUsdPerMillion: 2, outputUsdPerMillion: 10, cachedInputUsdPerMillion: 0.1, active: true
   },
   economy: {
     key: "economy", id: "gpt-6-luna", name: "GPT-6 Luna",
-    mode: "economy", inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.25, cachedInputUsdPerMillion: 0.005, active: true
+    mode: "economy", inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.5, cachedInputUsdPerMillion: 0.01, active: true
   }
 };
 const SYSTEM_PROMPT = [
