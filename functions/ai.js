@@ -2,10 +2,7 @@
 
 const crypto = require("crypto");
 const admin = require("firebase-admin");
-const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
-const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {defineSecret} = require("firebase-functions/params");
-const logger = require("firebase-functions/logger");
+const {onCall, onRequest, onSchedule, HttpsError, defineSecret, logger} = require("./runtime");
 
 const db = admin.firestore();
 const REGION = "asia-southeast2";
