@@ -1,0 +1,21 @@
+name: Backend checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+        working-directory: functions
+      - run: node --check index.js && node --check ai.js && node --check payments.js
+        working-directory: functions
+      - run: npm run lint
+        working-directory: functions
