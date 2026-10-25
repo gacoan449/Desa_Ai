@@ -1,0 +1,20 @@
+"use strict";
+const express = require("express");
+const cors = require("cors");
+const handlers = require("./index");
+const app = express();
+const port = Number(process.env.PORT || 8080);
+const allowedOrigins = String(process.env.ALLOWED_ORIGINS || "").split(",").map((v)=>v.trim()).filter(Boolean);
+app.use(cors({origin(origin, callback) {
+  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+  return callback(new Error("Origin tidak diizinkan oleh CORS."));
+}, methods:["GET","POST","OPTIONS"], allowedHeaders:["Authorization","Content-Type","Accept","X-Callback-Signature","X-Callback-Event"]}));
+app.use(express.json({limit:"1mb",verify(req,_res,buffer){req.rawBody=Buffer.from(buffer);}}));
+app.get("/healthz",(_req,res)=>res.status(200).json({ok:true,service:"desa-ai-api"}));
+for (const name of ["aiGetConfig","aiCreateRoom","aiRenameRoom","aiDeleteRoom","aiGetPaymentChannels","aiCreateTopupPayment","aiAdminListPendingUsage","aiAdminRefundUnconfirmedUsage"]) app.post("/"+name,handlers[name]);
+app.post("/aiChatStream",handlers.aiChatStream);
+app.post("/aiTripayCallback",handlers.aiTripayCallback);
+app.post("/_internal/reconcile",handlers.aiReconcilePending);
+app.use((error,_req,res,_next)=>{console.error("HTTP request failed",error.message);if(!res.headersSent)res.status(500).json({message:"Terjadi kesalahan pada server."});});
+if(require.main===module) app.listen(port,"0.0.0.0",()=>console.info("Desa AI API listening on "+port));
+module.exports=app;
