@@ -68,7 +68,8 @@ service cloud.firestore {
     }
     match /settings/{id} {
       allow read: if admin();
-      allow write: if admin();
+      // AI pricing is server-managed; admins must not edit trusted billing rates from a client.
+      allow write: if admin() && id != "ai_pricing";
     }
     match /{document=**} { allow read, write: if false; }
   }
