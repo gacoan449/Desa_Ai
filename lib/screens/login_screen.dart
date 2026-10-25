@@ -3,7 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import '../main.dart';
+const _green = Color(0xFF157A52);
+const _ink = Color(0xFF18251F);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -169,12 +170,12 @@ class _LoginScreenState extends State<LoginScreen> {
         if (MediaQuery.sizeOf(context).width <= 760) ...[
           Center(child: Container(width: 60, height: 60,
             decoration: BoxDecoration(color: const Color(0xFFE5F3EB), borderRadius: BorderRadius.circular(19)),
-            child: const Icon(Icons.auto_awesome_rounded, color: DesaAiApp.green, size: 30))),
+            child: const Icon(Icons.auto_awesome_rounded, color: _green, size: 30))),
           const SizedBox(height: 12),
-          const Center(child: Text('Desa AI', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, color: DesaAiApp.ink))),
+          const Center(child: Text('Desa AI', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, color: _ink))),
         ],
         Text(_isRegister ? 'Buat akun Anda' : 'Selamat datang kembali',
-          style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: DesaAiApp.ink)),
+          style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: _ink)),
         const SizedBox(height: 7),
         Text(_isRegister ? 'Mulai obrolan AI dengan biaya yang transparan.' : 'Masuk untuk melanjutkan ruang obrolan Anda.',
           style: const TextStyle(color: Color(0xFF758078), height: 1.45)),
