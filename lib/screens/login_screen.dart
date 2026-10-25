@@ -140,7 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        Container(width: 42, height: 42, decoration: BoxDecoration(color: Colors.white.withOpacity(.14), borderRadius: BorderRadius.circular(14)),
+        Container(width: 42, height: 42, decoration: BoxDecoration(color: Colors.white.withValues(alpha: .14), borderRadius: BorderRadius.circular(14)),
           child: const Icon(Icons.auto_awesome_rounded, color: Colors.white)),
         const SizedBox(width: 12),
         const Text('Desa AI', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
@@ -149,7 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
       const Text('Satu ruang.\nBanyak kemungkinan.', style: TextStyle(color: Colors.white, fontSize: 34, height: 1.15, fontWeight: FontWeight.w800)),
       const SizedBox(height: 16),
       Text('Teman berpikir untuk belajar, bekerja, mencari ide, dan menyelesaikan hal sehari-hari.',
-        style: TextStyle(color: Colors.white.withOpacity(.82), fontSize: 15, height: 1.55)),
+        style: TextStyle(color: Colors.white.withValues(alpha: .82), fontSize: 15, height: 1.55)),
       const SizedBox(height: 28),
       const _FeatureLine(icon: Icons.bolt_rounded, text: 'Jawaban streaming dan penggunaan transparan'),
       const SizedBox(height: 14),
@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
       const SizedBox(height: 14),
       const _FeatureLine(icon: Icons.extension_outlined, text: 'Plugin yang diaktifkan sesuai kebutuhan'),
       const Spacer(),
-      Text('Dirancang untuk pengguna Indonesia.', style: TextStyle(color: Colors.white.withOpacity(.72), fontSize: 12)),
+      Text('Dirancang untuk pengguna Indonesia.', style: TextStyle(color: Colors.white.withValues(alpha: .72), fontSize: 12)),
     ]),
   );
 
