@@ -99,6 +99,7 @@ exports.aiCreateTopupPayment = onCall({
   form.set("customer_name", clean(user.name || user.displayName || user.nama || "Pengguna Desa AI", 100));
   form.set("customer_email", email);
   if (user.phone) form.set("customer_phone", clean(user.phone, 40));
+  form.set("order_items[0][sku]", "DESA-AI-CREDIT");
   form.set("order_items[0][name]", "Kredit AI Desa AI");
   form.set("order_items[0][price]", String(amount));
   form.set("order_items[0][quantity]", "1");
