@@ -101,9 +101,11 @@ exports.aiCreateTopupPayment = onCall({
   form.set("order_items[0][name]", "Kredit AI Desa AI");
   form.set("order_items[0][price]", String(amount));
   form.set("order_items[0][quantity]", "1");
-  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
-  if (!projectId) throw new HttpsError("failed-precondition", "Firebase project ID runtime tidak tersedia.");
-  form.set("callback_url", "https://" + REGION + "-" + projectId + ".cloudfunctions.net/aiTripayCallback");
+  const publicApiUrl = String(process.env.PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(publicApiUrl)) {
+    throw new HttpsError("failed-precondition", "PUBLIC_API_BASE_URL wajib berisi URL HTTPS server API publik.");
+  }
+  form.set("callback_url", publicApiUrl + "/aiTripayCallback");
   form.set("expired_time", String(Math.floor(Date.now() / 1000) + 86400));
   form.set("signature", signature);
   const createdResponse = await fetch(apiBase() + "/transaction/create", {
