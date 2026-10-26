@@ -20,6 +20,7 @@ class WorkspaceScreen extends StatefulWidget {
 class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final _api = AiService();
   final _input = TextEditingController();
+  final _topupAmount = TextEditingController();
   final _focus = FocusNode();
   final _scroll = ScrollController();
   Map<String, dynamic>? _config;
@@ -41,7 +42,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   @override
   void initState() { super.initState(); _loadConfig(); }
   @override
-  void dispose() { _input.dispose(); _focus.dispose(); _scroll.dispose(); super.dispose(); }
+  void dispose() { _input.dispose(); _topupAmount.dispose(); _focus.dispose(); _scroll.dispose(); super.dispose(); }
 
   String _money(int amount) => NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(amount);
   void _notify(String message, {bool error = false}) {
@@ -158,6 +159,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         switch (event['type']) {
           case 'started':
             setState(() => _contextTokens = (event['contextTokens'] as num?)?.toInt() ?? 0);
+            if (((event['trimmedMessages'] as num?)?.toInt() ?? 0) > 0) {
+              _notify('Riwayat lama dipangkas otomatis agar konteks dan biaya tetap terkendali.');
+            }
             break;
           case 'token':
             setState(() => _draft += event['text']?.toString() ?? '');
@@ -433,10 +437,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _chat() {
     if (_configError != null && _config == null) return _error(_configError!);
     return Column(children: [
-      if (_contextTokens >= 25000) Container(width: double.infinity, margin: const EdgeInsets.fromLTRB(18, 12, 18, 0), padding: const EdgeInsets.all(12),
+      if (_contextTokens >= ((_config?['warningContextTokens'] as num?)?.toInt() ?? 12000)) Container(width: double.infinity, margin: const EdgeInsets.fromLTRB(18, 12, 18, 0), padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: const Color(0xFFFFF7E6), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF5D48C))),
         child: const Row(children: [Icon(Icons.warning_amber_rounded, color: Color(0xFF9A6700), size: 20), SizedBox(width: 10),
-          Expanded(child: Text('Memori chat hampir penuh. Buka ruang baru agar biaya input terkendali.', style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF7B5514))))])),
+          Expanded(child: Text('Konteks chat mendekati batas. Riwayat paling lama akan dipangkas otomatis agar biaya input tetap terkendali.', style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF7B5514))))])),
       Expanded(child: _roomId == null ? _welcome() : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance.collection('ai_users').doc(_user!.uid).collection('rooms').doc(_roomId!)
           .collection('messages').orderBy('createdAt').limit(200).snapshots(),
@@ -556,7 +560,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           const Text('•', style: TextStyle(fontSize: 10, color: Color(0xFFBAC0BB))),
           Text('Output ' + _money(outputPrice) + '/1.000 token', style: const TextStyle(fontSize: 10, color: _muted)),
           const Text('•', style: TextStyle(fontSize: 10, color: Color(0xFFBAC0BB))),
-          const Text('Maks. 30.000 token per ruang', style: TextStyle(fontSize: 10, color: _muted)),
+          Text('Maks. ${(_config?['maxContextTokens'] as num?)?.toInt() ?? 16000} token per permintaan', style: const TextStyle(fontSize: 10, color: _muted)),
         ]),
       ]))));
   }
@@ -643,7 +647,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               );
             },
           ),
-          const SizedBox(height: 25), const Text('Pilih paket top-up', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)), const SizedBox(height: 12),
+          const SizedBox(height: 25), const Text('Pilih nominal top-up', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)), const SizedBox(height: 12),
           GridView.count(crossAxisCount: MediaQuery.sizeOf(context).width > 720 ? 4 : 2, shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.35,
             children: [10000, 25000, 50000, 100000].map((amount) => InkWell(borderRadius: BorderRadius.circular(18), onTap: () => _topUp(amount),
@@ -653,6 +657,29 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   Text(_money(amount), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: _ink)),
                   const SizedBox(height: 3), const Text('Sekali top-up', style: TextStyle(color: _muted, fontSize: 11)),
                 ])))).toList()),
+          const SizedBox(height: 12),
+          Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: _line)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Nominal lainnya', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+              const SizedBox(height: 5),
+              const Text('Masukkan nominal sendiri (Rp10.000–Rp10.000.000). Channel pembayaran dapat memiliki batas berbeda.',
+                style: TextStyle(color: _muted, fontSize: 11, height: 1.45)),
+              const SizedBox(height: 10),
+              TextField(controller: _topupAmount, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Nominal rupiah', prefixText: 'Rp ', hintText: 'Contoh: 15000')),
+              const SizedBox(height: 10),
+              SizedBox(width: double.infinity, child: FilledButton.icon(
+                onPressed: () {
+                  final amount = int.tryParse(_topupAmount.text.replaceAll(RegExp(r'[^0-9]'), ''));
+                  if (amount == null || amount < 10000 || amount > 10000000) {
+                    _notify('Nominal harus antara Rp10.000 dan Rp10.000.000.', error: true);
+                    return;
+                  }
+                  _topUp(amount);
+                },
+                icon: const Icon(Icons.add_card_rounded), label: const Text('Lanjutkan top-up'),
+              )),
+            ])),
           const SizedBox(height: 20),
           const _InfoCard(icon: Icons.verified_user_outlined, title: 'Pembayaran aman', body: 'Saldo masuk setelah callback TriPay cocok dengan invoice dan signature terverifikasi.'),
           const SizedBox(height: 10), const _InfoCard(icon: Icons.receipt_long_outlined, title: 'Ledger pemakaian', body: 'Debit, kredit, token, dan rekonsiliasi dicatat untuk audit.'),
