@@ -64,6 +64,14 @@ Login menampilkan satu tombol Google. Nama dan foto profil berasal dari profil G
 
 Endpoint pengguna selain callback memerlukan header `Authorization: Bearer <Firebase ID token>`. Jangan membuka port backend langsung tanpa TLS/reverse proxy dan aturan firewall. Gunakan akun admin terpisah untuk endpoint admin; backend tetap memvalidasi role.
 
+## Harga jual dan batas penggunaan
+
+Harga API standar yang menjadi dasar perhitungan saat ini: GPT-6.1 Sol input US$2,00 / output US$10,00 per satu juta token; GPT-6 Luna input US$0,10 / output US$0,50. Harga provider dapat berubah, jadi verifikasi kembali sebelum rilis. Backend memakai kurs default Rp18.000/USD dan pengali harga jual minimum 2,5x atas biaya token provider. Dokumen Firestore `settings/ai_pricing` dapat menaikkan pengali dan menyesuaikan tarif model; kode tidak mengizinkan pengali di bawah 2,5x.
+
+Konteks dijaga pada estimasi konservatif maksimum 16.000 token per permintaan (peringatan 12.000), output maksimum 1.000 token, dan riwayat tertua dipangkas otomatis saat diperlukan. Tagihan final dihitung dari usage yang dilaporkan provider, ditambah biaya pencarian web bila digunakan. Ini tetap bukan akses tanpa batas: saldo harus cukup untuk reservasi sebelum permintaan dikirim.
+
+Top-up dapat memakai nominal kustom Rp10.000–Rp10.000.000. Batas minimum/maksimum channel TriPay yang dipilih tetap berlaku; jumlah yang benar-benar dikreditkan adalah nominal top-up, bukan biaya tambahan pembayaran.
+
 ## Pengamanan transaksi
 
 - Backend memeriksa status akun, saldo dan rate limit.

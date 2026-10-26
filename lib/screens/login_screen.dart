@@ -44,14 +44,18 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() { _busy = true; _error = null; });
     try {
       final googleUser = await GoogleSignIn(scopes: const ['email']).signIn();
-      if (googleUser == null) return;
+      if (googleUser == null) {
+        return;
+      }
       final googleAuth = await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
       final result = await FirebaseAuth.instance.signInWithCredential(credential);
-      if (result.user != null) await _ensureProfile(result.user!);
+      if (result.user != null) {
+        await _ensureProfile(result.user!);
+      }
     } on FirebaseAuthException catch (error) {
       if (mounted) setState(() {
         _error = switch (error.code) {

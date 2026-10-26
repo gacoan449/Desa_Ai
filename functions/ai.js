@@ -7,9 +7,9 @@ const {onCall, onRequest, onSchedule, HttpsError, defineSecret, logger} = requir
 const db = admin.firestore();
 const REGION = "asia-southeast2";
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
-const MAX_CONTEXT_TOKENS = 30000;
-const WARNING_CONTEXT_TOKENS = 25000;
-const MAX_OUTPUT_TOKENS = 1200;
+const MAX_CONTEXT_TOKENS = 16000;
+const WARNING_CONTEXT_TOKENS = 12000;
+const MAX_OUTPUT_TOKENS = 1000;
 const MIN_BALANCE_IDR = 500;
 
 const DEFAULT_MODELS = {
@@ -82,7 +82,7 @@ async function pricing() {
   return {
     models,
     fxIdrPerUsd: bounded(saved.fxIdrPerUsd, 18000, 1000, 100000),
-    retailMultiplier: bounded(saved.retailMultiplier, 1.8, 1, 10),
+    retailMultiplier: Math.max(2.5, bounded(saved.retailMultiplier, 2.5, 1, 10)),
     minBalanceIdr: bounded(saved.minBalanceIdr, MIN_BALANCE_IDR, MIN_BALANCE_IDR, 1000000),
     maxOutputTokens: Math.round(bounded(saved.maxOutputTokens, MAX_OUTPUT_TOKENS, 64, MAX_OUTPUT_TOKENS)),
     webSearchUsdPerCall: bounded(saved.webSearchUsdPerCall, 0.01, 0, 100)
@@ -105,8 +105,10 @@ function reservationAmount(model, plugins, config) {
   return Math.max(config.minBalanceIdr, idrForUsd(reserveUsd, config));
 }
 function estimateTokens(value) {
-  // Only a context guard. Final billing always uses token usage returned by the provider.
-  return Math.ceil(Buffer.byteLength(String(value || ""), "utf8") / 2.5);
+  // Conservative guardrail, not a tokenizer. Final billing always uses provider-reported usage.
+  // The 1.5-byte divisor intentionally overestimates many Latin-language prompts to reduce
+  // the chance that an unusual script or long history exceeds the reserved context budget.
+  return Math.ceil(Buffer.byteLength(String(value || ""), "utf8") / 1.5);
 }
 function roomRef(uid, roomId) {
   return db.collection("ai_users").doc(uid).collection("rooms").doc(roomId);
@@ -411,17 +413,30 @@ exports.aiChatStream = onRequest({
     const roomSnap = await ref.get();
     if (!roomSnap.exists || (roomSnap.data() || {}).deleted) return res.status(404).json({message: "Ruang chat tidak ditemukan."});
     const page = await ref.collection("messages").orderBy("createdAt", "desc").limit(80).get();
-    const history = page.docs.reverse().map((d) => d.data() || {})
+    let history = page.docs.reverse().map((d) => d.data() || {})
       .filter((m) => ["user", "assistant"].includes(m.role) && typeof m.text === "string")
       .map((m) => ({role: m.role, content: m.text}));
-    const estimatedContext = estimateTokens(JSON.stringify([{role: "system", content: SYSTEM_PROMPT}, ...history, {role: "user", content: message}]));
-    if (estimatedContext > MAX_CONTEXT_TOKENS) return res.status(413).json({message: "Konteks mendekati/melebihi 30.000 token. Buka chat baru.", contextTokens: estimatedContext});
+    const estimateHistory = (items) => estimateTokens(JSON.stringify([
+      {role: "system", content: SYSTEM_PROMPT}, ...items, {role: "user", content: message}
+    ]));
+    let estimatedContext = estimateHistory(history);
+    let trimmedMessages = 0;
+    // Drop oldest history in pairs where possible; keep the new prompt and the most recent context.
+    while (estimatedContext > MAX_CONTEXT_TOKENS && history.length > 0) {
+      const removed = Math.min(history.length, history.length > 1 ? 2 : 1);
+      history.splice(0, removed);
+      trimmedMessages += removed;
+      estimatedContext = estimateHistory(history);
+    }
+    if (estimatedContext > MAX_CONTEXT_TOKENS) {
+      return res.status(413).json({message: "Pesan terlalu panjang untuk batas konteks. Ringkas pesan lalu coba lagi.", contextTokens: estimatedContext});
+    }
     await reserveMessage({uid, requestId, roomId: id, message, modelKey, model, config, plugins, estimatedContext});
     reserved = true;
 
     res.writeHead(200, {"Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform",
       "Connection": "keep-alive", "X-Accel-Buffering": "no"});
-    sse(res, {type: "started", requestId, contextTokens: estimatedContext});
+    sse(res, {type: "started", requestId, contextTokens: estimatedContext, trimmedMessages});
     const payload = {
       model: model.id, input: [{role: "system", content: SYSTEM_PROMPT}, ...history, {role: "user", content: message}],
       stream: true, max_output_tokens: config.maxOutputTokens, prompt_cache_key: "desa-ai-v1-" + model.id,
