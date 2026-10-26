@@ -10,7 +10,8 @@ const TRIPAY_API_KEY = defineSecret("TRIPAY_API_KEY");
 const TRIPAY_MERCHANT_CODE = defineSecret("TRIPAY_MERCHANT_CODE");
 const TRIPAY_PRIVATE_KEY = defineSecret("TRIPAY_PRIVATE_KEY");
 const TRIPAY_SANDBOX = defineString("TRIPAY_SANDBOX", {default: "true"});
-const PACKAGES = new Set([10000, 25000, 50000, 100000]);
+const MIN_TOPUP_IDR = 10000;
+const MAX_TOPUP_IDR = 10000000;
 
 function clean(value, max = 200) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -53,7 +54,7 @@ async function getChannels() {
     throw new HttpsError("unavailable", "Daftar channel TriPay tidak tersedia.");
   }
   return body.data.filter((item) => item && item.active === true && typeof item.code === "string" &&
-    (safeInt(item.minimum_amount) || 0) <= 100000 && (safeInt(item.maximum_amount) || 0) >= 10000);
+    (safeInt(item.minimum_amount) || 0) <= MAX_TOPUP_IDR && (safeInt(item.maximum_amount) || 0) >= MIN_TOPUP_IDR);
 }
 
 exports.aiGetPaymentChannels = onCall({region: REGION, secrets: [TRIPAY_API_KEY], maxInstances: 5}, async (request) => {
@@ -76,7 +77,9 @@ exports.aiCreateTopupPayment = onCall({
   const amount = safeInt(request.data && request.data.amount);
   const method = clean(request.data && request.data.method, 50).toUpperCase();
   const email = clean((request.data && request.data.email) || user.email || (request.auth.token && request.auth.token.email), 200);
-  if (!PACKAGES.has(amount)) throw new HttpsError("invalid-argument", "Pilih paket Rp10.000, Rp25.000, Rp50.000, atau Rp100.000.");
+  if (amount === null || amount < MIN_TOPUP_IDR || amount > MAX_TOPUP_IDR) {
+    throw new HttpsError("invalid-argument", "Nominal top-up harus antara Rp10.000 dan Rp10.000.000.");
+  }
   if (!method) throw new HttpsError("invalid-argument", "Metode pembayaran wajib dipilih.");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpsError("invalid-argument", "Email valid diperlukan untuk membuat invoice.");
   const apiKey = TRIPAY_API_KEY.value();
