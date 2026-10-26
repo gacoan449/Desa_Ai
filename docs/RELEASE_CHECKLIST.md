@@ -34,7 +34,7 @@ Gunakan project Firebase staging dan kredensial TriPay sandbox terlebih dahulu. 
 - [ ] Request pending dengan response ID direkonsiliasi oleh job scheduler.
 - [ ] Pending tanpa response ID muncul di antrean admin; jangan refund sebelum verifikasi provider.
 - [ ] Refund manual admin memerlukan alasan audit, membuat satu kredit ledger/mutasi, dan membuka ruang yang tertahan.
-- [ ] Uji konteks 25.000 token (warning) dan 30.000 token (hard guard). Perlu diingat guard saat ini estimasi UTF-8, bukan tokenizer persis.
+- [ ] Uji konteks 12.000 token (warning) dan 16.000 token (hard guard). Pastikan riwayat tertua dipangkas otomatis dan batas estimasi konservatif tidak mengirim konteks melewati reservasi.
 
 ## D. TriPay / keuangan
 
@@ -47,7 +47,7 @@ Gunakan project Firebase staging dan kredensial TriPay sandbox terlebih dahulu. 
 - [ ] Callback FAILED/EXPIRED tidak mengkredit.
 - [ ] Callback setelah terminal state yang bertentangan ditinjau, bukan dikredit otomatis.
 - [ ] `TRIPAY_SANDBOX` tetap true sampai sandbox selesai.
-- [ ] Kurs FX, retail multiplier, model rates, fee tool, limit token dan alert provider diset sebelum transaksi real.
+- [ ] Kurs FX, retail multiplier, model rates, fee tool, batas top-up Rp10.000–Rp10.000.000, limit konteks/output dan alert provider diset sebelum transaksi real.
 
 ## E. Release platform
 
