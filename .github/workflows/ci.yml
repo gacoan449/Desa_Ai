@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   flutter:
-    name: Flutter analyze and Android debug APK
+    name: Flutter analyze and Android release APKs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,13 +30,13 @@ jobs:
         run: flutter pub get
       - name: Analyze Dart
         run: flutter analyze --no-pub
-      - name: Build debug APK
-        run: flutter build apk --debug --dart-define=DESA_AI_API_URL=https://example.invalid
-      - name: Upload debug APK
+      - name: Build split release APKs
+        run: flutter build apk --release --split-per-abi --dart-define=DESA_AI_API_URL=https://example.invalid
+      - name: Upload release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: desa-ai-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: desa-ai-release-apks
+          path: build/app/outputs/flutter-apk/app-*-release.apk
           if-no-files-found: error
           retention-days: 7
 
