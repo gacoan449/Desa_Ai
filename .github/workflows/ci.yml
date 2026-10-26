@@ -56,13 +56,15 @@ jobs:
               raise SystemExit("Could not find android/app/build.gradle(.kts)")
           s = gradle.read_text()
           if gradle.suffix == ".kts":
+              if "import java.util.Base64" not in s:
+                  s = "import java.util.Base64\\nimport java.nio.charset.StandardCharsets\\n" + s
               signing = '''
               signingConfigs {
                   create("desaAiRelease") {
                       storeFile = file("desaai-release.jks")
-                      storePassword = String(java.util.Base64.getDecoder().decode(project.property("DESAAI_KEYSTORE_PASSWORD_B64") as String), java.nio.charset.StandardCharsets.UTF_8)
-                      keyAlias = String(java.util.Base64.getDecoder().decode(project.property("DESAAI_KEY_ALIAS_B64") as String), java.nio.charset.StandardCharsets.UTF_8)
-                      keyPassword = String(java.util.Base64.getDecoder().decode(project.property("DESAAI_KEY_PASSWORD_B64") as String), java.nio.charset.StandardCharsets.UTF_8)
+                      storePassword = String(Base64.getDecoder().decode(project.property("DESAAI_KEYSTORE_PASSWORD_B64") as String), StandardCharsets.UTF_8)
+                      keyAlias = String(Base64.getDecoder().decode(project.property("DESAAI_KEY_ALIAS_B64") as String), StandardCharsets.UTF_8)
+                      keyPassword = String(Base64.getDecoder().decode(project.property("DESAAI_KEY_PASSWORD_B64") as String), StandardCharsets.UTF_8)
                   }
               }
           '''
