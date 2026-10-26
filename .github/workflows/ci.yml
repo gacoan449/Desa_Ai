@@ -57,7 +57,7 @@ jobs:
           s = gradle.read_text()
           if gradle.suffix == ".kts":
               if "import java.util.Base64" not in s:
-                  s = "import java.util.Base64\\nimport java.nio.charset.StandardCharsets\\n" + s
+                  s = "import java.util.Base64" + chr(10) + "import java.nio.charset.StandardCharsets" + chr(10) + s
               signing = '''
               signingConfigs {
                   create("desaAiRelease") {
