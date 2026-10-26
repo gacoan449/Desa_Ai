@@ -49,7 +49,7 @@ jobs:
           with props.open("a") as out:
               for key in ("DESAAI_KEYSTORE_PASSWORD", "DESAAI_KEY_ALIAS", "DESAAI_KEY_PASSWORD"):
                   value = base64.b64encode(os.environ[key].encode()).decode()
-                  out.write("\\n" + key + "_B64=" + value + "\\n")
+                  out.write("\n" + key + "_B64=" + value + "\n")
           candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
           gradle = next((p for p in candidates if p.exists()), None)
           if gradle is None:
