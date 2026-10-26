@@ -202,7 +202,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     try {
       final channels = await _api.getPaymentChannels();
       if (!mounted) return;
-      if (channels.isEmpty) { _notify('Tidak ada channel pembayaran aktif di merchant TriPay.', error: true); return; }
+      final eligibleChannels = channels.where((channel) {
+        final minimum = (channel['minimumAmount'] as num?)?.toInt() ?? 10000;
+        final maximum = (channel['maximumAmount'] as num?)?.toInt() ?? 10000000;
+        return amount >= minimum && amount <= maximum;
+      }).toList();
+      if (eligibleChannels.isEmpty) {
+        _notify('Tidak ada channel pembayaran yang mendukung nominal ${_money(amount)}.', error: true);
+        return;
+      }
       final method = await showModalBottomSheet<String>(
         context: context, showDragHandle: true, isScrollControlled: true,
         builder: (context) => SafeArea(child: Padding(
@@ -213,9 +221,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             Text('Paket ${_money(amount)} • channel aktif dari TriPay', style: const TextStyle(color: _muted, fontSize: 12)),
             const SizedBox(height: 10),
             SizedBox(height: min(MediaQuery.sizeOf(context).height * .55, 440), child: ListView.separated(
-              itemCount: channels.length, separatorBuilder: (_, __) => const Divider(height: 1),
+              itemCount: eligibleChannels.length, separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, i) {
-                final ch = channels[i];
+                final ch = eligibleChannels[i];
                 return ListTile(
                   leading: Container(width: 42, height: 42, decoration: BoxDecoration(color: const Color(0xFFEAF4EE), borderRadius: BorderRadius.circular(13)), child: const Icon(Icons.account_balance_wallet_outlined, color: _green)),
                   title: Text(ch['name']?.toString() ?? ch['code'].toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
