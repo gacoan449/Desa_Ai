@@ -147,7 +147,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       final oldTitle = room.data()?['title']?.toString() ?? 'Chat baru';
       if (oldTitle == 'Chat baru') {
         final title = message.replaceAll(RegExp(r'\s+'), ' ');
-        try { await _api.renameRoom(id, title.length > 42 ? title.substring(0, 39) + '…' : title); } catch (_) {}
+        final shortenedTitle = title.length > 42 ? '${title.substring(0, 39)}…' : title;
+        try { await _api.renameRoom(id, shortenedTitle); } catch (_) {}
       }
       final requestId = DateTime.now().microsecondsSinceEpoch.toString() + Random.secure().nextInt(99999999).toString().padLeft(8, '0');
       final model = _modelKey;
@@ -209,7 +210,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Pilih metode pembayaran', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
             const SizedBox(height: 5),
-            Text('Paket ' + _money(amount) + ' • channel aktif dari TriPay', style: const TextStyle(color: _muted, fontSize: 12)),
+            Text('Paket ${_money(amount)} • channel aktif dari TriPay', style: const TextStyle(color: _muted, fontSize: 12)),
             const SizedBox(height: 10),
             SizedBox(height: min(MediaQuery.sizeOf(context).height * .55, 440), child: ListView.separated(
               itemCount: channels.length, separatorBuilder: (_, __) => const Divider(height: 1),
@@ -458,7 +459,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         },
       )),
       if (_lastCharge > 0) Padding(padding: const EdgeInsets.only(bottom: 5), child: Text(
-        'Pemakaian terakhir: $_lastTokens token • ' + _money(_lastCharge), style: const TextStyle(fontSize: 10, color: _muted))),
+        'Pemakaian terakhir: $_lastTokens token • ${_money(_lastCharge)}', style: const TextStyle(fontSize: 10, color: _muted))),
       _composer(),
     ]);
   }
@@ -556,9 +557,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         ),
         const SizedBox(height: 9),
         Wrap(alignment: WrapAlignment.center, spacing: 7, children: [
-          Text('Input ' + _money(inputPrice) + '/1.000 token', style: const TextStyle(fontSize: 10, color: _muted)),
+          Text('Input ${_money(inputPrice)}/1.000 token', style: const TextStyle(fontSize: 10, color: _muted)),
           const Text('•', style: TextStyle(fontSize: 10, color: Color(0xFFBAC0BB))),
-          Text('Output ' + _money(outputPrice) + '/1.000 token', style: const TextStyle(fontSize: 10, color: _muted)),
+          Text('Output ${_money(outputPrice)}/1.000 token', style: const TextStyle(fontSize: 10, color: _muted)),
           const Text('•', style: TextStyle(fontSize: 10, color: Color(0xFFBAC0BB))),
           Text('Maks. ${(_config?['maxContextTokens'] as num?)?.toInt() ?? 16000} token per permintaan', style: const TextStyle(fontSize: 10, color: _muted)),
         ]),
@@ -761,7 +762,7 @@ class _InvoiceDialog extends StatelessWidget {
         if (code.isNotEmpty) ...[const SizedBox(height: 12), SelectableText(code, textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.2)), const SizedBox(height: 5),
           const Text('Kode bayar / Virtual Account', style: TextStyle(color: _muted, fontSize: 11))],
-        const SizedBox(height: 12), SelectableText('Referensi: ' + reference, style: const TextStyle(color: _muted, fontSize: 11)),
+        const SizedBox(height: 12), SelectableText('Referensi: $reference', style: const TextStyle(color: _muted, fontSize: 11)),
       ]))),
       actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Selesai'))]);
   }
