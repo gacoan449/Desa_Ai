@@ -41,7 +41,15 @@ jobs:
           echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
           python3 - <<'PY'
           from pathlib import Path
+          import base64
+          import os
           import re
+          # Keep signing values in a runner-local, base64-encoded Gradle properties file.
+          props = Path("android/gradle.properties")
+          with props.open("a") as out:
+              for key in ("DESAAI_KEYSTORE_PASSWORD", "DESAAI_KEY_ALIAS", "DESAAI_KEY_PASSWORD"):
+                  value = base64.b64encode(os.environ[key].encode()).decode()
+                  out.write("\\n" + key + "_B64=" + value + "\\n")
           candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
           gradle = next((p for p in candidates if p.exists()), None)
           if gradle is None:
@@ -52,9 +60,9 @@ jobs:
               signingConfigs {
                   create("desaAiRelease") {
                       storeFile = file("desaai-release.jks")
-                      storePassword = System.getenv("DESAAI_KEYSTORE_PASSWORD")
-                      keyAlias = System.getenv("DESAAI_KEY_ALIAS")
-                      keyPassword = System.getenv("DESAAI_KEY_PASSWORD")
+                      storePassword = String(java.util.Base64.getDecoder().decode(project.property("DESAAI_KEYSTORE_PASSWORD_B64") as String), java.nio.charset.StandardCharsets.UTF_8)
+                      keyAlias = String(java.util.Base64.getDecoder().decode(project.property("DESAAI_KEY_ALIAS_B64") as String), java.nio.charset.StandardCharsets.UTF_8)
+                      keyPassword = String(java.util.Base64.getDecoder().decode(project.property("DESAAI_KEY_PASSWORD_B64") as String), java.nio.charset.StandardCharsets.UTF_8)
                   }
               }
           '''
@@ -69,9 +77,9 @@ jobs:
               signingConfigs {
                   desaAiRelease {
                       storeFile file("desaai-release.jks")
-                      storePassword System.getenv("DESAAI_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("DESAAI_KEY_ALIAS")
-                      keyPassword System.getenv("DESAAI_KEY_PASSWORD")
+                      storePassword new String(Base64.decoder.decode(project.property("DESAAI_KEYSTORE_PASSWORD_B64")), "UTF-8")
+                      keyAlias new String(Base64.decoder.decode(project.property("DESAAI_KEY_ALIAS_B64")), "UTF-8")
+                      keyPassword new String(Base64.decoder.decode(project.property("DESAAI_KEY_PASSWORD_B64")), "UTF-8")
                   }
               }
           '''
