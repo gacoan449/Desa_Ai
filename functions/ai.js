@@ -423,8 +423,9 @@ exports.aiChatStream = onRequest({
     let trimmedMessages = 0;
     // Drop oldest history in pairs where possible; keep the new prompt and the most recent context.
     while (estimatedContext > MAX_CONTEXT_TOKENS && history.length > 0) {
-      history.splice(0, Math.min(history.length, history.length > 1 ? 2 : 1));
-      trimmedMessages += Math.min(2, history.length + 2);
+      const removed = Math.min(history.length, history.length > 1 ? 2 : 1);
+      history.splice(0, removed);
+      trimmedMessages += removed;
       estimatedContext = estimateHistory(history);
     }
     if (estimatedContext > MAX_CONTEXT_TOKENS) {
