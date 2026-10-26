@@ -12,6 +12,20 @@
           "package_name": "com.desaai.app"
         }
       },
+      "oauth_client": [
+        {
+          "client_id": "295144083758-0nl1e17jllb752d64sbg4itqaecc4f0a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.desaai.app",
+            "certificate_hash": "be8ca7c90012338a8897fa04ebf654b674d22b46"
+          }
+        },
+        {
+          "client_id": "295144083758-afasfbkh7i2qbsebg389nke2htk34p9s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCCoStDl2BPu2WapQI8WWXm5NEKwRmVDko"
@@ -19,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "295144083758-afasfbkh7i2qbsebg389nke2htk34p9s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
