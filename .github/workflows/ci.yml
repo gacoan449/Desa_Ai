@@ -24,10 +24,66 @@ jobs:
           java-version: "17"
       - name: Generate Android platform files for CI
         run: flutter create --platforms=android --project-name desa_ai .
-      - name: Print Android signing fingerprints (SHA-1 / SHA-256)
+      - name: Configure permanent release signing (when GitHub secrets are set)
+        env:
+          DESAAI_KEYSTORE_BASE64: ${{ secrets.DESAAI_KEYSTORE_BASE64 }}
+          DESAAI_KEYSTORE_PASSWORD: ${{ secrets.DESAAI_KEYSTORE_PASSWORD }}
+          DESAAI_KEY_ALIAS: ${{ secrets.DESAAI_KEY_ALIAS }}
+          DESAAI_KEY_PASSWORD: ${{ secrets.DESAAI_KEY_PASSWORD }}
         run: |
-          cd android
-          ./gradlew signingReport
+          if [ -z "$DESAAI_KEYSTORE_BASE64" ]; then
+            echo "Permanent release key not configured; using Flutter's default signing for this build."
+            exit 0
+          fi
+          test -n "$DESAAI_KEYSTORE_PASSWORD"
+          test -n "$DESAAI_KEY_ALIAS"
+          test -n "$DESAAI_KEY_PASSWORD"
+          echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
+          gradle = next((p for p in candidates if p.exists()), None)
+          if gradle is None:
+              raise SystemExit("Could not find android/app/build.gradle(.kts)")
+          s = gradle.read_text()
+          if gradle.suffix == ".kts":
+              signing = '''
+              signingConfigs {
+                  create("desaAiRelease") {
+                      storeFile = file("desaai-release.jks")
+                      storePassword = System.getenv("DESAAI_KEYSTORE_PASSWORD")
+                      keyAlias = System.getenv("DESAAI_KEY_ALIAS")
+                      keyPassword = System.getenv("DESAAI_KEY_PASSWORD")
+                  }
+              }
+          '''
+              if 'create("desaAiRelease")' not in s:
+                  s, n = re.subn(r'(?m)^([ \\t]*)buildTypes\\s*\\{', signing + r'\\n\\1buildTypes {', s, count=1)
+                  if n != 1:
+                      raise SystemExit("Could not add release signing config to Kotlin Gradle file")
+              s = s.replace('signingConfig = signingConfigs.getByName("debug")',
+                            'signingConfig = signingConfigs.getByName("desaAiRelease")')
+          else:
+              signing = '''
+              signingConfigs {
+                  desaAiRelease {
+                      storeFile file("desaai-release.jks")
+                      storePassword System.getenv("DESAAI_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("DESAAI_KEY_ALIAS")
+                      keyPassword System.getenv("DESAAI_KEY_PASSWORD")
+                  }
+              }
+          '''
+              if "desaAiRelease {" not in s:
+                  s, n = re.subn(r'(?m)^([ \\t]*)buildTypes\\s*\\{', signing + r'\\n\\1buildTypes {', s, count=1)
+                  if n != 1:
+                      raise SystemExit("Could not add release signing config to Groovy Gradle file")
+              s = s.replace('signingConfig signingConfigs.debug',
+                            'signingConfig signingConfigs.desaAiRelease')
+          gradle.write_text(s)
+          print(f"Configured permanent release signing in {gradle}")
+          PY
       - name: Remove generated counter-app test
         run: rm -f test/widget_test.dart
       - name: Resolve Flutter dependencies
@@ -36,6 +92,14 @@ jobs:
         run: flutter analyze --no-pub
       - name: Build split release APKs
         run: flutter build apk --release --split-per-abi --dart-define=DESA_AI_API_URL=https://example.invalid
+      - name: Print actual APK signing certificate fingerprints
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "=== $apk ==="
+            "$APKSIGNER" verify --print-certs "$apk"
+          done
       - name: Upload release APKs
         uses: actions/upload-artifact@v4
         with:
