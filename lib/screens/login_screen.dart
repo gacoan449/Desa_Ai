@@ -57,18 +57,22 @@ class _LoginScreenState extends State<LoginScreen> {
         await _ensureProfile(result.user!);
       }
     } on FirebaseAuthException catch (error) {
-      if (mounted) setState(() {
-        _error = switch (error.code) {
-          'account-exists-with-different-credential' => 'Akun sudah terhubung dengan metode masuk lain.',
-          'network-request-failed' => 'Periksa koneksi internet Anda.',
-          'user-disabled' => 'Akun ini dinonaktifkan.',
-          _ => error.message ?? 'Login Google gagal.',
-        };
-      });
+      if (mounted) {
+        setState(() {
+          _error = switch (error.code) {
+            'account-exists-with-different-credential' => 'Akun sudah terhubung dengan metode masuk lain.',
+            'network-request-failed' => 'Periksa koneksi internet Anda.',
+            'user-disabled' => 'Akun ini dinonaktifkan.',
+            _ => error.message ?? 'Login Google gagal.',
+          };
+        });
+      }
     } catch (error) {
-      if (mounted) setState(() {
-        _error = 'Login Google gagal. Periksa provider Google dan OAuth Firebase. $error';
-      });
+      if (mounted) {
+        setState(() {
+          _error = 'Login Google gagal. Periksa provider Google dan OAuth Firebase. $error';
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
