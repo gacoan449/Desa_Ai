@@ -82,7 +82,7 @@ async function pricing() {
   return {
     models,
     fxIdrPerUsd: bounded(saved.fxIdrPerUsd, 18000, 1000, 100000),
-    retailMultiplier: bounded(saved.retailMultiplier, 1.8, 1, 10),
+    retailMultiplier: Math.max(2.5, bounded(saved.retailMultiplier, 2.5, 1, 10)),
     minBalanceIdr: bounded(saved.minBalanceIdr, MIN_BALANCE_IDR, MIN_BALANCE_IDR, 1000000),
     maxOutputTokens: Math.round(bounded(saved.maxOutputTokens, MAX_OUTPUT_TOKENS, 64, MAX_OUTPUT_TOKENS)),
     webSearchUsdPerCall: bounded(saved.webSearchUsdPerCall, 0.01, 0, 100)
