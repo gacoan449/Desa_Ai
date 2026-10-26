@@ -59,7 +59,7 @@ jobs:
               }
           '''
               if 'create("desaAiRelease")' not in s:
-                  s, n = re.subn(r'(?m)^([ \\t]*)buildTypes\\s*\\{', signing + r'\\n\\1buildTypes {', s, count=1)
+                  s, n = re.subn(r'(?m)^([ \t]*)buildTypes\s*\{', signing + r'\n\1buildTypes {', s, count=1)
                   if n != 1:
                       raise SystemExit("Could not add release signing config to Kotlin Gradle file")
               s = s.replace('signingConfig = signingConfigs.getByName("debug")',
@@ -76,7 +76,7 @@ jobs:
               }
           '''
               if "desaAiRelease {" not in s:
-                  s, n = re.subn(r'(?m)^([ \\t]*)buildTypes\\s*\\{', signing + r'\\n\\1buildTypes {', s, count=1)
+                  s, n = re.subn(r'(?m)^([ \t]*)buildTypes\s*\{', signing + r'\n\1buildTypes {', s, count=1)
                   if n != 1:
                       raise SystemExit("Could not add release signing config to Groovy Gradle file")
               s = s.replace('signingConfig signingConfigs.debug',
