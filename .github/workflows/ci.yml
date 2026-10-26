@@ -24,6 +24,10 @@ jobs:
           java-version: "17"
       - name: Generate Android platform files for CI
         run: flutter create --platforms=android --project-name desa_ai .
+      - name: Print Android signing fingerprints (SHA-1 / SHA-256)
+        run: |
+          cd android
+          ./gradlew signingReport
       - name: Remove generated counter-app test
         run: rm -f test/widget_test.dart
       - name: Resolve Flutter dependencies
