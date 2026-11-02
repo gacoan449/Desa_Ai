@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -113,6 +114,47 @@ class AuthGate extends StatelessWidget {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.data == null) return const LoginScreen();
+        return _ProfileGate(user: snapshot.data!);
+      },
+    );
+  }
+}
+
+
+class _ProfileGate extends StatelessWidget {
+  const _ProfileGate({required this.user});
+  final User user;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasError || !snapshot.hasData || !snapshot.data!.exists) {
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.account_circle_outlined, size: 44, color: Color(0xFF9A6700)),
+                  const SizedBox(height: 14),
+                  const Text('Profil belum siap', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  const Text('Desa AI belum dapat memuat profil akun. Keluar lalu coba masuk kembali. Jika masalah berulang, hubungi bantuan.',
+                    textAlign: TextAlign.center),
+                  const SizedBox(height: 18),
+                  FilledButton(
+                    onPressed: () => FirebaseAuth.instance.signOut(),
+                    child: const Text('Keluar'),
+                  ),
+                ]),
+              ),
+            ),
+          );
+        }
         return const WorkspaceScreen();
       },
     );

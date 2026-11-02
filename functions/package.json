@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "lint": "eslint .",
-    "check": "node --check index.js && node --check server.js && node --check runtime.js && node --check ai.js && node --check payments.js"
+    "check": "node --check index.js && node --check server.js && node --check runtime.js && node --check ai.js && node --check payments.js",
+    "test:emulator": "node --test test/*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

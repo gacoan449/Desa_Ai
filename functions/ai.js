@@ -104,6 +104,33 @@ function reservationAmount(model, plugins, config) {
     (plugins.includes("web_search") ? config.webSearchUsdPerCall : 0);
   return Math.max(config.minBalanceIdr, idrForUsd(reserveUsd, config));
 }
+function billingSnapshot(model, plugins, config) {
+  return {
+    modelKey: model.key, modelId: model.id,
+    inputUsdPerMillion: model.inputUsdPerMillion,
+    outputUsdPerMillion: model.outputUsdPerMillion,
+    cachedInputUsdPerMillion: model.cachedInputUsdPerMillion,
+    fxIdrPerUsd: config.fxIdrPerUsd,
+    retailMultiplier: config.retailMultiplier,
+    webSearchUsdPerCall: plugins.includes("web_search") ? config.webSearchUsdPerCall : 0,
+    capturedAt: admin.firestore.FieldValue.serverTimestamp()
+  };
+}
+function calculateChargeIdr(response, snapshot, forceRefund) {
+  if (forceRefund) return {usd: 0, amountIdr: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, searchCalls: 0};
+  const reported = (response && response.usage) || {};
+  const inputTokens = Math.max(0, safeInt(reported.input_tokens) || 0);
+  const outputTokens = Math.max(0, safeInt(reported.output_tokens) || 0);
+  const cachedTokens = Math.min(inputTokens, Math.max(0, safeInt((reported.input_tokens_details || {}).cached_tokens) || 0));
+  const uncachedTokens = Math.max(0, inputTokens - cachedTokens);
+  const searchCalls = response ? countSearchCalls(response) : 0;
+  const usd = (uncachedTokens * snapshot.inputUsdPerMillion +
+    cachedTokens * snapshot.cachedInputUsdPerMillion +
+    outputTokens * snapshot.outputUsdPerMillion) / 1000000 +
+    searchCalls * snapshot.webSearchUsdPerCall;
+  const amountIdr = usd <= 0 ? 0 : Math.ceil(usd * snapshot.fxIdrPerUsd * snapshot.retailMultiplier);
+  return {usd, amountIdr, inputTokens, outputTokens, cachedTokens, searchCalls};
+}
 function estimateTokens(value) {
   // Conservative guardrail, not a tokenizer. Final billing always uses provider-reported usage.
   // The 1.5-byte divisor intentionally overestimates many Latin-language prompts to reduce
@@ -178,6 +205,7 @@ async function reserveMessage({uid, requestId, roomId, message, modelKey, model,
     if (usageSnap.exists) throw new HttpsError("already-exists", "ID permintaan sudah digunakan.");
     const user = userSnap.data() || {};
     if (isDisabled(user)) throw new HttpsError("permission-denied", "Akun sedang dinonaktifkan.");
+    if (user.billingHold === true) throw new HttpsError("failed-precondition", "Akun memiliki kewajiban pembayaran yang perlu diselesaikan sebelum menggunakan AI lagi.");
     if ((roomSnap.data() || {}).activeRequestId) throw new HttpsError("failed-precondition", "Jawaban sebelumnya di ruang ini masih diproses.");
     const before = safeInt(user.balance);
     if (before === null || before < reserve) throw new HttpsError("failed-precondition", "Saldo tidak cukup untuk reservasi Rp " + reserve.toLocaleString("id-ID") + ". Top-up atau pilih model hemat.");
@@ -188,7 +216,7 @@ async function reserveMessage({uid, requestId, roomId, message, modelKey, model,
     tx.create(mutation, {uid, tipe: "KELUAR", nominal: reserve, saldoAwal: before, saldoAkhir: after, keterangan: "Reservasi pemakaian Desa AI", sumber: "AI_RESERVE", transactionId: requestId, roomId, waktu: now});
     tx.create(usage, {uid, requestId, roomId, modelKey, model: model.id, status: "RESERVED", reservedAmountIdr: reserve,
       chargedAmountIdr: null, inputTokens: 0, outputTokens: 0, cachedTokens: 0, webSearchCalls: 0,
-      estimatedContext, plugins, providerResponseId: null, createdAt: now, updatedAt: now});
+      estimatedContext, plugins, providerResponseId: null, billingSnapshot: billingSnapshot(model, plugins, config), createdAt: now, updatedAt: now});
     tx.create(messageRef, {role: "user", text: message, requestId, createdAt: now, status: "complete"});
     tx.update(room, {activeRequestId: requestId, model: model.id, plugins, estimatedContextTokens: estimatedContext,
       messageCount: Math.max(0, safeInt((roomSnap.data() || {}).messageCount) || 0) + 1, updatedAt: now});
@@ -201,25 +229,20 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
   if (!snap.exists) throw new Error("USAGE_RECORD_NOT_FOUND");
   const record = snap.data() || {};
   if (!["RESERVED", "PENDING_RECONCILIATION"].includes(record.status)) return {alreadySettled: true, chargedAmountIdr: record.chargedAmountIdr || 0};
-  const config = await pricing();
-  const model = config.models[record.modelKey];
-  if (!model) throw new Error("MODEL_CONFIG_MISSING");
-  const reported = (response && response.usage) || {};
-  const inputTokens = forceRefund ? 0 : Math.max(0, safeInt(reported.input_tokens) || 0);
-  const outputTokens = forceRefund ? 0 : Math.max(0, safeInt(reported.output_tokens) || 0);
-  const cachedTokens = Math.min(inputTokens, Math.max(0, safeInt((reported.input_tokens_details || {}).cached_tokens) || 0));
-  const uncachedTokens = Math.max(0, inputTokens - cachedTokens);
-  const searchCalls = forceRefund ? 0 : (response ? countSearchCalls(response) : 0);
-  const usd = forceRefund ? 0 :
-    (uncachedTokens * model.inputUsdPerMillion + cachedTokens * model.cachedInputUsdPerMillion + outputTokens * model.outputUsdPerMillion) / 1000000 +
-    searchCalls * config.webSearchUsdPerCall;
-  const actual = idrForUsd(usd, config);
+  const legacyConfig = record.billingSnapshot ? null : await pricing();
+  const model = legacyConfig && legacyConfig.models[record.modelKey];
+  const snapshot = record.billingSnapshot || (model ? billingSnapshot(model, record.plugins || [], legacyConfig) : null);
+  if (!snapshot) throw new Error("BILLING_SNAPSHOT_MISSING");
+  const calculated = calculateChargeIdr(response, snapshot, forceRefund);
+  const {inputTokens, outputTokens, cachedTokens, searchCalls, usd} = calculated;
+  const actual = calculated.amountIdr;
   const userRef = db.collection("users").doc(uid);
   const room = roomRef(uid, record.roomId);
   const profile = db.collection("ai_users").doc(uid);
   const answerRef = room.collection("messages").doc();
   const ledger = db.collection("balance_ledger").doc();
   const mutation = db.collection("mutasi_saldo").doc();
+  const obligation = db.collection("ai_billing_obligations").doc("ai_" + usage.id);
   return db.runTransaction(async (tx) => {
     const [usageSnap, userSnap, roomSnap, profileSnap] = await Promise.all([tx.get(usage), tx.get(userRef), tx.get(room), tx.get(profile)]);
     if (!usageSnap.exists || !userSnap.exists) throw new Error("SETTLEMENT_RECORD_MISSING");
@@ -247,7 +270,8 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
     }
     const now = admin.firestore.FieldValue.serverTimestamp();
     if (delta > 0) {
-      tx.update(userRef, {balance: balanceAfter, updatedAt: now});
+      tx.update(userRef, {balance: balanceAfter, updatedAt: now,
+        ...(underpayment > 0 ? {billingHold: true, billingHoldReason: "AI_PROVIDER_UNDERPAYMENT"} : {})});
       tx.create(ledger, {uid, type: deltaType, amount: delta, before, after: balanceAfter,
         reason: deltaType === "CREDIT" ? "Pengembalian reservasi AI" : "Penyesuaian pemakaian AI",
         source: deltaType === "CREDIT" ? "AI_SETTLEMENT_REFUND" : "AI_SETTLEMENT_ADDITIONAL",
@@ -267,6 +291,13 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
       messageCount: Math.max(0, safeInt(roomData.messageCount) || 0) + (answer.trim() ? 1 : 0), updatedAt: now};
     if (roomData.activeRequestId === requestId) roomUpdate.activeRequestId = admin.firestore.FieldValue.delete();
     tx.set(room, roomUpdate, {merge: true});
+    if (underpayment > 0) {
+      tx.create(obligation, {uid, requestId, roomId: current.roomId, model: current.model,
+        type: "AI_PROVIDER_UNDERPAYMENT", amountIdr: underpayment, status: "OPEN", source: "AI_PROVIDER_UNDERPAYMENT",
+        providerCostUsd: usd, reservedAmountIdr: reserve, chargedAmountIdr: charge,
+        createdAt: now, updatedAt: now});
+      if (delta === 0) tx.update(userRef, {billingHold: true, billingHoldReason: "AI_PROVIDER_UNDERPAYMENT", updatedAt: now});
+    }
     tx.update(usage, {status: underpayment > 0 ? "SETTLED_NEEDS_REVIEW" : failureStatus, chargedAmountIdr: charge,
       estimatedProviderCostUsd: usd, inputTokens, outputTokens, cachedTokens, webSearchCalls: searchCalls,
       providerResponseId: response && response.id ? response.id : current.providerResponseId || null,
@@ -295,7 +326,10 @@ exports.aiGetConfig = onCall({region: REGION}, async (request) => {
   const account = await activeAccount(uid);
   const config = await pricing();
   return {
-    balance: safeInt(account.data.balance) || 0, minBalanceIdr: config.minBalanceIdr,
+    balance: safeInt(account.data.balance) || 0,
+    billingHold: account.data.billingHold === true,
+    billingHoldReason: text(account.data.billingHoldReason, 100),
+    minBalanceIdr: config.minBalanceIdr,
     maxContextTokens: MAX_CONTEXT_TOKENS, warningContextTokens: WARNING_CONTEXT_TOKENS,
     maxOutputTokens: config.maxOutputTokens,
     models: Object.values(config.models).filter((m) => m.active).map((m) => modelPublic(m, config)),
@@ -396,6 +430,7 @@ exports.aiChatStream = onRequest({
     const config = await pricing();
     const model = config.models[modelKey];
     if (!model || !model.active) return res.status(400).json({message: "Model belum aktif."});
+    if (account.data.billingHold === true) return res.status(402).json({message: "Akun memiliki kewajiban pembayaran yang perlu diselesaikan sebelum menggunakan AI lagi."});
     const currentBalance = safeInt(account.data.balance);
     const requiredReserve = reservationAmount(model, plugins, config);
     if (currentBalance === null || currentBalance < requiredReserve) {
@@ -604,6 +639,81 @@ exports.aiAdminRefundUnconfirmedUsage = onCall({region: REGION, maxInstances: 3}
   });
 });
 
+exports.aiAdminListBillingObligations = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const adminUid = requireUid(request);
+  await requireAdmin(adminUid);
+  const snap = await db.collection("ai_billing_obligations").where("status", "==", "OPEN").limit(100).get();
+  return {obligations: snap.docs.map((doc) => {
+    const item = doc.data() || {};
+    return {id: doc.id, uid: text(item.uid, 128), requestId: text(item.requestId, 80),
+      amountIdr: safeInt(item.amountIdr) || 0, maxRefundAmountIdr: safeInt(item.maxRefundAmountIdr),
+      type: text(item.type, 60), source: text(item.source, 80),
+      amountVerified: item.amountVerified === true, sourceId: text(item.sourceId, 200),
+      createdAtMillis: item.createdAt && typeof item.createdAt.toMillis === "function" ? item.createdAt.toMillis() : null};
+  })};
+});
+exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const adminUid = requireUid(request);
+  await requireAdmin(adminUid);
+  const id = text(request.data && request.data.obligationId, 160);
+  const reason = text(request.data && request.data.reason, 500);
+  const providerVerifiedRefundAmount = request.data && request.data.providerVerifiedRefundAmount === true;
+  const verifiedRefundAmountIdr = safeInt(request.data && request.data.verifiedRefundAmountIdr);
+  const providerVerificationReference = text(request.data && request.data.providerVerificationReference, 200);
+  if (!id || reason.length < 20) throw new HttpsError("invalid-argument", "ID kewajiban dan alasan audit minimal 20 karakter wajib diisi.");
+  const obligation = db.collection("ai_billing_obligations").doc(id);
+  return db.runTransaction(async (tx) => {
+    const obligationSnap = await tx.get(obligation);
+    if (!obligationSnap.exists) throw new HttpsError("not-found", "Kewajiban tidak ditemukan.");
+    const item = obligationSnap.data() || {};
+    if (item.status === "SETTLED") return {success: true, alreadySettled: true};
+    if (item.status !== "OPEN") throw new HttpsError("failed-precondition", "Status kewajiban bukan OPEN.");
+    const userRef = db.collection("users").doc(String(item.uid || ""));
+    const ledgerRef = db.collection("balance_ledger").doc("obligation_" + id);
+    const mutationRef = db.collection("mutasi_saldo").doc("obligation_" + id);
+    const sourceTopupRef = item.type === "TRIPAY_REFUND" && item.sourceId
+      ? db.collection("topup_transactions").doc(String(item.sourceId)) : null;
+    const [userSnap, ledgerSnap, openSnap, sourceTopupSnap] = await Promise.all([
+      tx.get(userRef), tx.get(ledgerRef),
+      tx.get(db.collection("ai_billing_obligations").where("uid", "==", item.uid).where("status", "==", "OPEN")),
+      sourceTopupRef ? tx.get(sourceTopupRef) : Promise.resolve(null)
+    ]);
+    if (!userSnap.exists) throw new HttpsError("not-found", "Profil pengguna tidak ditemukan.");
+    if (ledgerSnap.exists) throw new HttpsError("already-exists", "Ledger kewajiban sudah ada; periksa transaksi.");
+    let amount = safeInt(item.amountIdr);
+    if (item.type === "TRIPAY_REFUND") {
+      const maximum = safeInt(item.maxRefundAmountIdr);
+      if (!providerVerifiedRefundAmount || !providerVerificationReference ||
+          verifiedRefundAmountIdr === null || verifiedRefundAmountIdr < 1 ||
+          maximum === null || verifiedRefundAmountIdr > maximum) {
+        throw new HttpsError("failed-precondition", "Nominal refund TriPay, verifiedRefundAmountIdr, dan providerVerificationReference wajib diverifikasi di dashboard provider.");
+      }
+      amount = verifiedRefundAmountIdr;
+    }
+    const before = safeInt((userSnap.data() || {}).balance);
+    if (!amount || amount < 1 || before === null || before < amount) throw new HttpsError("failed-precondition", "Saldo pengguna belum mencukupi untuk menyelesaikan kewajiban.");
+    const after = before - amount;
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.update(userRef, {balance: after, billingHold: openSnap.size > 1, billingHoldReason: openSnap.size > 1 ? "OPEN_BILLING_OBLIGATION" : admin.firestore.FieldValue.delete(), updatedAt: now});
+    tx.create(ledgerRef, {uid: item.uid, type: "DEBIT", amount, before, after, reason: "Penyelesaian kewajiban pemakaian AI",
+      source: "AI_BILLING_OBLIGATION_SETTLEMENT", obligationId: id, reviewedBy: adminUid, reviewReason: reason, createdAt: now});
+    tx.create(mutationRef, {uid: item.uid, tipe: "KELUAR", nominal: amount, saldoAwal: before, saldoAkhir: after,
+      keterangan: "Penyelesaian kewajiban AI", sumber: "AI_BILLING_OBLIGATION_SETTLEMENT",
+      obligationId: id, reviewedBy: adminUid, reviewReason: reason, waktu: now});
+    tx.update(obligation, {status: "SETTLED", amountIdr: amount,
+      amountVerified: item.type === "TRIPAY_REFUND" ? true : (item.amountVerified || false),
+      providerVerificationReference: item.type === "TRIPAY_REFUND" ? providerVerificationReference : null,
+      settledBy: adminUid, settlementReason: reason, settledAt: now, updatedAt: now});
+    if (sourceTopupRef && sourceTopupSnap && sourceTopupSnap.exists) {
+      const maximumRefund = safeInt(item.maxRefundAmountIdr) || amount;
+      tx.update(sourceTopupRef, {status: amount < maximumRefund ? "REFUNDED_PARTIAL" : "REFUNDED",
+        refunded: true, refundPending: false, refundAmount: amount, refundedAt: now,
+        refundSettledBy: adminUid, refundSettlementReason: reason, updatedAt: now});
+    }
+    return {success: true, amountIdr: amount, remainingBalanceIdr: after, billingHold: openSnap.size > 1};
+  });
+});
+
 exports.aiReconcilePending = onSchedule({
   schedule: "every 10 minutes", region: REGION, timeoutSeconds: 120, memory: "256MiB", secrets: [OPENAI_API_KEY]
 }, async () => {
@@ -626,3 +736,7 @@ exports.aiReconcilePending = onSchedule({
     } catch (err) { logger.warn("AI reconciliation retry failed", {requestId: item.requestId, message: err.message}); }
   }
 });
+
+
+// Test-only exports used by the Firestore Emulator concurrency suite.
+exports.__test = {reserveMessage, settle, billingSnapshot, calculateChargeIdr, usageRef};

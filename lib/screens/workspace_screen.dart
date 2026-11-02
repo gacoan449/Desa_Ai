@@ -169,12 +169,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             _scrollToEnd();
             break;
           case 'final':
+            final underpayment = (event['underpaymentIdr'] as num?)?.toInt() ?? 0;
             setState(() {
               _lastCharge = (event['chargedAmountIdr'] as num?)?.toInt() ?? 0;
               _lastTokens = (event['totalTokens'] as num?)?.toInt() ?? 0;
               _draft = '';
               _busy = false;
             });
+            if (underpayment > 0) {
+              _notify('Ada kekurangan biaya provider ${_money(underpayment)}. Penggunaan AI ditahan sampai pemeriksaan admin selesai.', error: true);
+              _loadConfig();
+            }
             break;
           case 'pending':
             _notify(event['message']?.toString() ?? 'Pemakaian sedang direkonsiliasi.');
@@ -188,7 +193,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       }
       if (mounted && _busy) setState(() { _draft = ''; _busy = false; });
     } catch (e) {
-      if (mounted) { setState(() { _draft = ''; _busy = false; }); _notify(e.toString(), error: true); }
+      if (mounted) {
+        setState(() { _draft = ''; _busy = false; });
+        _notify(e.toString(), error: true);
+        _loadConfig();
+      }
     }
   }
 
@@ -446,6 +455,25 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _chat() {
     if (_configError != null && _config == null) return _error(_configError!);
     return Column(children: [
+      if (_config?['billingHold'] == true) Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF0EF),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFF4B8B2)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.lock_outline_rounded, color: Color(0xFFB42318), size: 20),
+          const SizedBox(width: 10),
+          const Expanded(child: Text(
+            'Penggunaan AI ditahan karena ada kewajiban pembayaran yang perlu diperiksa. Anda masih dapat membuka Saldo & top-up.',
+            style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF8D211A)),
+          )),
+          TextButton(onPressed: () => setState(() => _page = 'wallet'), child: const Text('Saldo')),
+        ]),
+      ),
       if (_contextTokens >= ((_config?['warningContextTokens'] as num?)?.toInt() ?? 12000)) Container(width: double.infinity, margin: const EdgeInsets.fromLTRB(18, 12, 18, 0), padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: const Color(0xFFFFF7E6), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF5D48C))),
         child: const Row(children: [Icon(Icons.warning_amber_rounded, color: Color(0xFF9A6700), size: 20), SizedBox(width: 10),

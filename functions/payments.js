@@ -57,6 +57,26 @@ async function getChannels() {
     (safeInt(item.minimum_amount) || 0) <= MAX_TOPUP_IDR && (safeInt(item.maximum_amount) || 0) >= MIN_TOPUP_IDR);
 }
 
+async function markInvoiceCreationState(topupRef, activeRef, merchantRef, status, details = {}) {
+  await db.runTransaction(async (tx) => {
+    const [topupSnap, lockSnap] = await Promise.all([tx.get(topupRef), tx.get(activeRef)]);
+    if (!topupSnap.exists) return;
+    const current = topupSnap.data() || {};
+    const terminal = ["PAID", "FAILED", "EXPIRED", "REFUNDED", "REFUNDED_PARTIAL",
+      "REFUNDED_UNCREDITED", "REFUND_NEEDS_REVIEW"].includes(current.status);
+    if (terminal) {
+      if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(activeRef);
+      return;
+    }
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.update(topupRef, {status, ...details, updatedAt: now});
+    if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) {
+      if (status === "CREATE_FAILED") tx.delete(activeRef);
+      else tx.set(activeRef, {status, updatedAt: now}, {merge: true});
+    }
+  });
+}
+
 exports.aiGetPaymentChannels = onCall({region: REGION, secrets: [TRIPAY_API_KEY], maxInstances: 5}, async (request) => {
   const uid = requireUid(request);
   await getUser(uid);
@@ -90,8 +110,31 @@ exports.aiCreateTopupPayment = onCall({
   const channel = channels.find((c) => c.code.toUpperCase() === method &&
     (safeInt(c.minimum_amount) || 0) <= amount && (safeInt(c.maximum_amount) || 0) >= amount);
   if (!channel) throw new HttpsError("failed-precondition", "Channel sedang tidak aktif atau tidak mendukung paket ini.");
+  const publicApiUrl = String(process.env.PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(publicApiUrl)) {
+    throw new HttpsError("failed-precondition", "PUBLIC_API_BASE_URL wajib berisi URL HTTPS server API publik.");
+  }
 
   const merchantRef = "DAI-" + Date.now().toString(36).toUpperCase() + "-" + crypto.randomBytes(5).toString("hex").toUpperCase();
+  const topupRef = db.collection("topup_transactions").doc(merchantRef);
+  const activeRef = db.collection("topup_active").doc(uid);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  // A per-user lock serializes invoice creation and prevents duplicate active invoices.
+  await db.runTransaction(async (tx) => {
+    const activeSnap = await tx.get(activeRef);
+    if (activeSnap.exists) {
+      const active = activeSnap.data() || {};
+      const expiresAt = safeInt(active.expiresAt) || 0;
+      const stillOpen = active.status === "CREATE_UNKNOWN" ||
+        (["CREATING", "UNPAID"].includes(active.status) && expiresAt > nowSeconds);
+      if (stillOpen) throw new HttpsError("already-exists", "Masih ada tagihan top-up aktif. Selesaikan atau tunggu kedaluwarsa sebelum membuat tagihan baru.");
+    }
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.create(topupRef, {uid, merchantRef, reference: null, requestedAmount: amount, packageAmount: amount,
+      creditAmount: amount, totalAmount: null, status: "CREATING", credited: false, source: "AI_TOPUP",
+      paymentMethod: method, createdAt: now, updatedAt: now});
+    tx.set(activeRef, {merchantRef, status: "CREATING", expiresAt: nowSeconds + 120, updatedAt: now});
+  });
   const signature = crypto.createHmac("sha256", privateKey).update(merchantCode + merchantRef + amount).digest("hex");
   const form = new URLSearchParams();
   form.set("method", method);
@@ -104,39 +147,109 @@ exports.aiCreateTopupPayment = onCall({
   form.set("order_items[0][name]", "Kredit AI Desa AI");
   form.set("order_items[0][price]", String(amount));
   form.set("order_items[0][quantity]", "1");
-  const publicApiUrl = String(process.env.PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
-  if (!/^https:\/\//i.test(publicApiUrl)) {
-    throw new HttpsError("failed-precondition", "PUBLIC_API_BASE_URL wajib berisi URL HTTPS server API publik.");
-  }
   form.set("callback_url", publicApiUrl + "/aiTripayCallback");
   form.set("expired_time", String(Math.floor(Date.now() / 1000) + 86400));
   form.set("signature", signature);
-  const createdResponse = await fetch(apiBase() + "/transaction/create", {
-    method: "POST",
-    headers: {Authorization: "Bearer " + apiKey, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"},
-    body: form, signal: AbortSignal.timeout(20000)
-  });
-  const created = await createdResponse.json().catch(() => ({}));
+  let createdResponse;
+  let created;
+  try {
+    createdResponse = await fetch(apiBase() + "/transaction/create", {
+      method: "POST",
+      headers: {Authorization: "Bearer " + apiKey, "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"},
+      body: form, signal: AbortSignal.timeout(20000)
+    });
+    created = await createdResponse.json().catch(() => ({}));
+  } catch (error) {
+    // A timeout can happen after the provider created the invoice. Keep the lock for reconciliation.
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_UNKNOWN",
+      {reconciliationReason: "Provider request outcome unknown."});
+    throw new HttpsError("unavailable", "Status pembuatan tagihan belum pasti. Jangan membuat pembayaran ulang; hubungi bantuan untuk pemeriksaan.");
+  }
+  if (!createdResponse.ok && createdResponse.status >= 500) {
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_UNKNOWN",
+      {providerHttpStatus: createdResponse.status, reconciliationReason: "Provider 5xx; invoice outcome is ambiguous."});
+    throw new HttpsError("unavailable", "Status pembuatan tagihan belum pasti. Jangan membuat pembayaran ulang; hubungi bantuan untuk pemeriksaan.");
+  }
   if (!createdResponse.ok || created.success !== true || !created.data) {
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_FAILED",
+      {providerHttpStatus: createdResponse.status});
     logger.error("TriPay invoice creation failed", {status: createdResponse.status, merchantRef});
     throw new HttpsError("unavailable", "TriPay gagal membuat tagihan. Saldo belum ditambahkan.");
   }
   const invoice = created.data;
-  const totalAmount = safeInt(invoice.total_amount) || amount;
+  const totalAmount = safeInt(invoice.total_amount);
   const reference = clean(invoice.reference, 200);
-  if (!reference || totalAmount < amount) throw new HttpsError("unavailable", "Data invoice TriPay tidak valid.");
+  if (!reference || totalAmount === null || totalAmount < amount) {
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_UNKNOWN",
+      {reconciliationReason: "Provider returned incomplete invoice data."});
+    throw new HttpsError("unavailable", "Data invoice belum lengkap. Tagihan ditahan untuk pemeriksaan agar tidak terbuat ganda.");
+  }
+  const expiresAt = safeInt(invoice.expired_time) || (nowSeconds + 86400);
   const now = admin.firestore.FieldValue.serverTimestamp();
-  await db.collection("topup_transactions").doc(merchantRef).create({
-    uid, merchantRef, reference, amount: totalAmount, totalAmount, packageAmount: amount, creditAmount: amount,
-    status: "UNPAID", credited: false, source: "AI_TOPUP",
-    paymentMethod: clean(invoice.payment_method || method, 60), paymentName: clean(invoice.payment_name || channel.name, 100),
-    paymentCode: clean(invoice.pay_code || invoice.payment_code, 200), qrUrl: clean(invoice.qr_url, 1000),
-    qrString: clean(invoice.qr_string, 2000), feeCustomer: safeInt(invoice.fee_customer) || 0,
-    expiredTime: safeInt(invoice.expired_time) || (Math.floor(Date.now() / 1000) + 86400), createdAt: now, updatedAt: now
+  await db.runTransaction(async (tx) => {
+    const [savedSnap, lockSnap] = await Promise.all([tx.get(topupRef), tx.get(activeRef)]);
+    if (!savedSnap.exists) throw new Error("TOPUP_RECORD_MISSING");
+    const current = savedSnap.data() || {};
+    // A callback may arrive before the create response is persisted. Never downgrade a terminal state.
+    if (!["PAID", "REFUNDED", "REFUNDED_UNCREDITED", "REFUND_NEEDS_REVIEW"].includes(current.status)) {
+      tx.update(topupRef, {reference, amount: totalAmount, totalAmount, status: "UNPAID",
+        paymentMethod: clean(invoice.payment_method || method, 60), paymentName: clean(invoice.payment_name || channel.name, 100),
+        paymentCode: clean(invoice.pay_code || invoice.payment_code, 200), qrUrl: clean(invoice.qr_url, 1000),
+        qrString: clean(invoice.qr_string, 2000), feeCustomer: safeInt(invoice.fee_customer) || 0,
+        expiredTime: expiresAt, updatedAt: now});
+    } else if (!current.reference) {
+      tx.update(topupRef, {reference, amount: totalAmount, totalAmount, updatedAt: now});
+    }
+    if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) {
+      if (["PAID", "REFUNDED", "REFUNDED_UNCREDITED", "REFUND_NEEDS_REVIEW"].includes(current.status)) tx.delete(activeRef);
+      else tx.set(activeRef, {status: "UNPAID", expiresAt, updatedAt: now}, {merge: true});
+    }
   });
   return {success: true, reference, merchant_ref: merchantRef, payment_method: invoice.payment_name || invoice.payment_method || method,
     payment_code: invoice.pay_code || invoice.payment_code || "", qr_url: invoice.qr_url || "", qr_string: invoice.qr_string || "",
-    total_amount: totalAmount, fee_admin: safeInt(invoice.fee_customer) || 0, expired_time: safeInt(invoice.expired_time) || 0};
+    total_amount: totalAmount, fee_admin: safeInt(invoice.fee_customer) || 0, expired_time: expiresAt};
+});
+
+exports.aiAdminListPendingTopups = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const uid = requireUid(request);
+  const {user} = await getUser(uid);
+  if (user.role !== "admin") throw new HttpsError("permission-denied", "Akses hanya untuk admin.");
+  const snap = await db.collection("topup_transactions").where("status", "in", ["CREATING", "CREATE_UNKNOWN"]).limit(100).get();
+  return {pending: snap.docs.map((doc) => {
+    const item = doc.data() || {};
+    return {merchantRef: doc.id, uid: clean(item.uid, 128), status: clean(item.status, 40),
+      packageAmount: safeInt(item.packageAmount) || 0, reference: clean(item.reference, 200),
+      reconciliationReason: clean(item.reconciliationReason, 300),
+      createdAtMillis: item.createdAt && typeof item.createdAt.toMillis === "function" ? item.createdAt.toMillis() : null};
+  })};
+});
+
+exports.aiAdminResolveUnknownTopup = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const adminUid = requireUid(request);
+  const {user} = await getUser(adminUid);
+  if (user.role !== "admin") throw new HttpsError("permission-denied", "Akses hanya untuk admin.");
+  const merchantRef = clean(request.data && request.data.merchantRef, 200);
+  const reason = clean(request.data && request.data.reason, 500);
+  const verified = request.data && request.data.providerVerifiedNoInvoice === true;
+  if (!merchantRef || reason.length < 20 || !verified) {
+    throw new HttpsError("invalid-argument", "Merchant reference, alasan audit minimal 20 karakter, dan verifikasi provider bahwa invoice tidak ada wajib diisi.");
+  }
+  const topupRef = db.collection("topup_transactions").doc(merchantRef);
+  return db.runTransaction(async (tx) => {
+    const topupSnap = await tx.get(topupRef);
+    if (!topupSnap.exists) throw new HttpsError("not-found", "Catatan top-up tidak ditemukan.");
+    const item = topupSnap.data() || {};
+    if (!["CREATING", "CREATE_UNKNOWN"].includes(item.status) || item.reference || item.credited === true) {
+      throw new HttpsError("failed-precondition", "Hanya invoice yang belum memiliki reference dan masih berstatus tidak pasti yang dapat diselesaikan dengan prosedur ini.");
+    }
+    const userLockRef = db.collection("topup_active").doc(String(item.uid || ""));
+    const lockSnap = await tx.get(userLockRef);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.update(topupRef, {status: "CREATE_FAILED", resolvedBy: adminUid, resolutionReason: reason,
+      providerVerifiedNoInvoice: true, resolvedAt: now, updatedAt: now});
+    if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(userLockRef);
+    return {success: true, status: "CREATE_FAILED"};
+  });
 });
 
 function validSignature(raw, received, secret) {
@@ -165,39 +278,80 @@ exports.aiTripayCallback = onRequest({
     return reply(400, {success: false, message: "Invalid callback fields."});
   }
   const topupRef = db.collection("topup_transactions").doc(merchantRef);
-  const ledgerRef = db.collection("balance_ledger").doc("tripay_" + crypto.createHash("sha256").update(merchantRef).digest("hex"));
-  const mutationRef = db.collection("mutasi_saldo").doc("tripay_" + crypto.createHash("sha256").update(merchantRef).digest("hex"));
+  const ledgerId = "tripay_" + crypto.createHash("sha256").update(merchantRef).digest("hex");
+  const ledgerRef = db.collection("balance_ledger").doc(ledgerId);
+  const mutationRef = db.collection("mutasi_saldo").doc(ledgerId);
+  const refundId = "tripay_refund_" + crypto.createHash("sha256").update(merchantRef).digest("hex");
+  const refundLedgerRef = db.collection("balance_ledger").doc(refundId);
+  const refundMutationRef = db.collection("mutasi_saldo").doc(refundId);
+  const obligationRef = db.collection("ai_billing_obligations").doc(refundId);
   try {
     const result = await db.runTransaction(async (tx) => {
       const topupSnap = await tx.get(topupRef);
       if (!topupSnap.exists) throw new Error("TOPUP_NOT_FOUND");
       const topup = topupSnap.data() || {};
-      if (topup.reference !== reference || topup.merchantRef !== merchantRef) throw new Error("REFERENCE_MISMATCH");
-      if (safeInt(topup.totalAmount) !== totalAmount) throw new Error("AMOUNT_MISMATCH");
-      if (topup.status === "PAID" && topup.credited === true) return {alreadyPaid: true};
-      if (["FAILED", "EXPIRED", "REFUND"].includes(topup.status) && topup.status !== status) throw new Error("TERMINAL_STATE_CONFLICT");
-      if (status !== "PAID") {
-        tx.update(topupRef, {status, updatedAt: admin.firestore.FieldValue.serverTimestamp()});
+      if (topup.merchantRef !== merchantRef) throw new Error("REFERENCE_MISMATCH");
+      const pendingInvoice = !topup.reference && ["CREATING", "CREATE_UNKNOWN"].includes(topup.status);
+      if (!pendingInvoice && topup.reference !== reference) throw new Error("REFERENCE_MISMATCH");
+      if (pendingInvoice && totalAmount < (safeInt(topup.packageAmount) || 0)) throw new Error("AMOUNT_MISMATCH");
+      if (!pendingInvoice && safeInt(topup.totalAmount) !== totalAmount) throw new Error("AMOUNT_MISMATCH");
+      const uid = String(topup.uid || "");
+      const userRef = db.collection("users").doc(uid);
+      const lockRef = db.collection("topup_active").doc(uid);
+      const [userSnap, lockSnap] = await Promise.all([tx.get(userRef), tx.get(lockRef)]);
+      const now = admin.firestore.FieldValue.serverTimestamp();
+
+      if (status === "PAID") {
+        if (topup.status === "PAID" && topup.credited === true) return {alreadyPaid: true};
+        if (["REFUNDED", "REFUNDED_UNCREDITED", "REFUND_NEEDS_REVIEW", "FAILED", "EXPIRED"].includes(topup.status)) throw new Error("TERMINAL_STATE_CONFLICT");
+        if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
+        const creditAmount = safeInt(topup.creditAmount || topup.packageAmount);
+        const before = safeInt((userSnap.data() || {}).balance);
+        if (!creditAmount || creditAmount < 1 || before === null || before < 0 || !Number.isSafeInteger(before + creditAmount)) throw new Error("BALANCE_INVALID");
+        const after = before + creditAmount;
+        tx.update(userRef, {balance: after, updatedAt: now});
+        tx.create(ledgerRef, {uid, type: "CREDIT", amount: creditAmount, before, after,
+          reason: "Top-up saldo AI melalui TriPay", source: "AI_TOPUP_TRIPAY", merchantRef, reference, createdAt: now});
+        tx.create(mutationRef, {uid, tipe: "MASUK", nominal: creditAmount, saldoAwal: before, saldoAkhir: after,
+          keterangan: "Top-up Desa AI via TriPay", sumber: "AI_TOPUP_TRIPAY", merchantRef, reference, waktu: now});
+        tx.update(topupRef, {reference, amount: totalAmount, totalAmount, status: "PAID", credited: true,
+          creditedAmount: creditAmount, saldoAwal: before, saldoAkhir: after, amountReceived: safeInt(data.amount_received) || 0,
+          paidAt: now, updatedAt: now});
+        if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
+        return {credited: true, amount: creditAmount};
+      }
+
+      if (status === "REFUND") {
+        if (["REFUNDED", "REFUNDED_PARTIAL", "REFUNDED_UNCREDITED"].includes(topup.status)) return {alreadyRefunded: true};
+        if (topup.status === "REFUND_NEEDS_REVIEW") return {alreadyPendingReview: true};
+        if (topup.status !== "PAID" || topup.credited !== true) {
+          tx.update(topupRef, {reference, amount: totalAmount, totalAmount, status: "REFUNDED_UNCREDITED",
+            refunded: true, refundedAt: now, updatedAt: now});
+          if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
+          return {credited: false, refunded: false, status: "REFUNDED_UNCREDITED"};
+        }
+        const creditAmount = safeInt(topup.creditedAmount || topup.creditAmount || topup.packageAmount);
+        if (!userSnap.exists || !creditAmount || creditAmount < 1) throw new Error("REFUND_AMOUNT_INVALID");
+        // TriPay's callback supplies the original total_amount but no dedicated refund_amount.
+        // Never debit a guessed amount: require an admin to verify the actual refund with the provider.
+        tx.create(obligationRef, {uid, type: "TRIPAY_REFUND", sourceId: merchantRef,
+          amountIdr: creditAmount, maxRefundAmountIdr: creditAmount, amountVerified: false,
+          status: "OPEN", reason: "TriPay mengirim status REFUND; nominal refund harus diverifikasi di dashboard provider.",
+          createdAt: now, updatedAt: now});
+        tx.update(userRef, {billingHold: true, billingHoldReason: "TRIPAY_REFUND_REVIEW", updatedAt: now});
+        tx.update(topupRef, {status: "REFUND_NEEDS_REVIEW", refundAmount: null,
+          refundMaximumAmount: creditAmount, refunded: false, refundPending: true, updatedAt: now});
+        if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
+        return {credited: true, refunded: false, needsReview: true, maxAmountIdr: creditAmount};
+      }
+
+      if (["FAILED", "EXPIRED"].includes(status)) {
+        if (topup.status === "PAID" || topup.credited === true || ["REFUNDED", "REFUNDED_PARTIAL", "REFUND_NEEDS_REVIEW"].includes(topup.status)) throw new Error("TERMINAL_STATE_CONFLICT");
+        tx.update(topupRef, {reference: reference || null, amount: totalAmount, totalAmount, status, updatedAt: now});
+        if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
         return {credited: false, status};
       }
-      const creditAmount = safeInt(topup.creditAmount || topup.packageAmount);
-      if (!creditAmount || creditAmount < 1) throw new Error("CREDIT_AMOUNT_INVALID");
-      const userRef = db.collection("users").doc(String(topup.uid || ""));
-      const userSnap = await tx.get(userRef);
-      if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
-      const user = userSnap.data() || {};
-      const before = safeInt(user.balance);
-      if (before === null || before < 0 || !Number.isSafeInteger(before + creditAmount)) throw new Error("BALANCE_INVALID");
-      const after = before + creditAmount;
-      const now = admin.firestore.FieldValue.serverTimestamp();
-      tx.update(userRef, {balance: after, updatedAt: now});
-      tx.create(ledgerRef, {uid: topup.uid, type: "CREDIT", amount: creditAmount, before, after,
-        reason: "Top-up saldo AI melalui TriPay", source: "AI_TOPUP_TRIPAY", merchantRef, reference, createdAt: now});
-      tx.create(mutationRef, {uid: topup.uid, tipe: "MASUK", nominal: creditAmount, saldoAwal: before, saldoAkhir: after,
-        keterangan: "Top-up Desa AI via TriPay", sumber: "AI_TOPUP_TRIPAY", merchantRef, reference, waktu: now});
-      tx.update(topupRef, {status: "PAID", credited: true, creditedAmount: creditAmount, saldoAwal: before, saldoAkhir: after,
-        amountReceived: safeInt(data.amount_received) || 0, paidAt: now, updatedAt: now});
-      return {credited: true, amount: creditAmount};
+      throw new Error("UNSUPPORTED_STATUS");
     });
     return reply(200, {success: true, ...result});
   } catch (err) {
