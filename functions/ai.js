@@ -663,9 +663,12 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
     const userRef = db.collection("users").doc(String(item.uid || ""));
     const ledgerRef = db.collection("balance_ledger").doc("obligation_" + id);
     const mutationRef = db.collection("mutasi_saldo").doc("obligation_" + id);
-    const [userSnap, ledgerSnap, openSnap] = await Promise.all([
+    const sourceTopupRef = item.type === "TRIPAY_REFUND" && item.sourceId
+      ? db.collection("topup_transactions").doc(String(item.sourceId)) : null;
+    const [userSnap, ledgerSnap, openSnap, sourceTopupSnap] = await Promise.all([
       tx.get(userRef), tx.get(ledgerRef),
-      tx.get(db.collection("ai_billing_obligations").where("uid", "==", item.uid).where("status", "==", "OPEN"))
+      tx.get(db.collection("ai_billing_obligations").where("uid", "==", item.uid).where("status", "==", "OPEN")),
+      sourceTopupRef ? tx.get(sourceTopupRef) : Promise.resolve(null)
     ]);
     if (!userSnap.exists) throw new HttpsError("not-found", "Profil pengguna tidak ditemukan.");
     if (ledgerSnap.exists) throw new HttpsError("already-exists", "Ledger kewajiban sudah ada; periksa transaksi.");
@@ -681,6 +684,10 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
       keterangan: "Penyelesaian kewajiban AI", sumber: "AI_BILLING_OBLIGATION_SETTLEMENT",
       obligationId: id, reviewedBy: adminUid, reviewReason: reason, waktu: now});
     tx.update(obligation, {status: "SETTLED", settledBy: adminUid, settlementReason: reason, settledAt: now, updatedAt: now});
+    if (sourceTopupRef && sourceTopupSnap && sourceTopupSnap.exists) {
+      tx.update(sourceTopupRef, {status: "REFUNDED", refunded: true, refundPending: false,
+        refundedAt: now, refundSettledBy: adminUid, refundSettlementReason: reason, updatedAt: now});
+    }
     return {success: true, amountIdr: amount, remainingBalanceIdr: after, billingHold: openSnap.size > 1};
   });
 });
