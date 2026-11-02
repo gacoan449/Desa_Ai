@@ -656,6 +656,7 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
   const reason = text(request.data && request.data.reason, 500);
   const providerVerifiedRefundAmount = request.data && request.data.providerVerifiedRefundAmount === true;
   const verifiedRefundAmountIdr = safeInt(request.data && request.data.verifiedRefundAmountIdr);
+  const providerVerificationReference = text(request.data && request.data.providerVerificationReference, 200);
   if (!id || reason.length < 20) throw new HttpsError("invalid-argument", "ID kewajiban dan alasan audit minimal 20 karakter wajib diisi.");
   const obligation = db.collection("ai_billing_obligations").doc(id);
   return db.runTransaction(async (tx) => {
@@ -679,9 +680,10 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
     let amount = safeInt(item.amountIdr);
     if (item.type === "TRIPAY_REFUND") {
       const maximum = safeInt(item.maxRefundAmountIdr);
-      if (!providerVerifiedRefundAmount || verifiedRefundAmountIdr === null ||
-          verifiedRefundAmountIdr < 1 || maximum === null || verifiedRefundAmountIdr > maximum) {
-        throw new HttpsError("failed-precondition", "Nominal refund TriPay harus diverifikasi di dashboard provider dan dikirim sebagai verifiedRefundAmountIdr.");
+      if (!providerVerifiedRefundAmount || !providerVerificationReference ||
+          verifiedRefundAmountIdr === null || verifiedRefundAmountIdr < 1 ||
+          maximum === null || verifiedRefundAmountIdr > maximum) {
+        throw new HttpsError("failed-precondition", "Nominal refund TriPay, verifiedRefundAmountIdr, dan providerVerificationReference wajib diverifikasi di dashboard provider.");
       }
       amount = verifiedRefundAmountIdr;
     }
@@ -697,6 +699,7 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
       obligationId: id, reviewedBy: adminUid, reviewReason: reason, waktu: now});
     tx.update(obligation, {status: "SETTLED", amountIdr: amount,
       amountVerified: item.type === "TRIPAY_REFUND" ? true : (item.amountVerified || false),
+      providerVerificationReference: item.type === "TRIPAY_REFUND" ? providerVerificationReference : null,
       settledBy: adminUid, settlementReason: reason, settledAt: now, updatedAt: now});
     if (sourceTopupRef && sourceTopupSnap && sourceTopupSnap.exists) {
       const maximumRefund = safeInt(item.maxRefundAmountIdr) || amount;
