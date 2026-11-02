@@ -90,6 +90,10 @@ exports.aiCreateTopupPayment = onCall({
   const channel = channels.find((c) => c.code.toUpperCase() === method &&
     (safeInt(c.minimum_amount) || 0) <= amount && (safeInt(c.maximum_amount) || 0) >= amount);
   if (!channel) throw new HttpsError("failed-precondition", "Channel sedang tidak aktif atau tidak mendukung paket ini.");
+  const publicApiUrl = String(process.env.PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+  if (!/^https:\/\//i.test(publicApiUrl)) {
+    throw new HttpsError("failed-precondition", "PUBLIC_API_BASE_URL wajib berisi URL HTTPS server API publik.");
+  }
 
   const merchantRef = "DAI-" + Date.now().toString(36).toUpperCase() + "-" + crypto.randomBytes(5).toString("hex").toUpperCase();
   const topupRef = db.collection("topup_transactions").doc(merchantRef);
@@ -122,10 +126,6 @@ exports.aiCreateTopupPayment = onCall({
   form.set("order_items[0][name]", "Kredit AI Desa AI");
   form.set("order_items[0][price]", String(amount));
   form.set("order_items[0][quantity]", "1");
-  const publicApiUrl = String(process.env.PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
-  if (!/^https:\/\//i.test(publicApiUrl)) {
-    throw new HttpsError("failed-precondition", "PUBLIC_API_BASE_URL wajib berisi URL HTTPS server API publik.");
-  }
   form.set("callback_url", publicApiUrl + "/aiTripayCallback");
   form.set("expired_time", String(Math.floor(Date.now() / 1000) + 86400));
   form.set("signature", signature);
