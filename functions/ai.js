@@ -270,7 +270,8 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
     }
     const now = admin.firestore.FieldValue.serverTimestamp();
     if (delta > 0) {
-      tx.update(userRef, {balance: balanceAfter, updatedAt: now});
+      tx.update(userRef, {balance: balanceAfter, updatedAt: now,
+        ...(underpayment > 0 ? {billingHold: true, billingHoldReason: "AI_PROVIDER_UNDERPAYMENT"} : {})});
       tx.create(ledger, {uid, type: deltaType, amount: delta, before, after: balanceAfter,
         reason: deltaType === "CREDIT" ? "Pengembalian reservasi AI" : "Penyesuaian pemakaian AI",
         source: deltaType === "CREDIT" ? "AI_SETTLEMENT_REFUND" : "AI_SETTLEMENT_ADDITIONAL",
@@ -295,7 +296,7 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
         amountIdr: underpayment, status: "OPEN", source: "AI_PROVIDER_UNDERPAYMENT",
         providerCostUsd: usd, reservedAmountIdr: reserve, chargedAmountIdr: charge,
         createdAt: now, updatedAt: now});
-      tx.set(userRef, {billingHold: true, billingHoldReason: "AI_PROVIDER_UNDERPAYMENT", updatedAt: now}, {merge: true});
+      if (delta === 0) tx.update(userRef, {billingHold: true, billingHoldReason: "AI_PROVIDER_UNDERPAYMENT", updatedAt: now});
     }
     tx.update(usage, {status: underpayment > 0 ? "SETTLED_NEEDS_REVIEW" : failureStatus, chargedAmountIdr: charge,
       estimatedProviderCostUsd: usd, inputTokens, outputTokens, cachedTokens, webSearchCalls: searchCalls,
