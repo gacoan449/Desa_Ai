@@ -9,8 +9,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
     function disabled(data) {
-      return data.disabled == true || data.isDisabled == true || data.isBlocked == true
-        || data.isActive == false || data.status in ["disabled", "inactive", "blocked", "banned", "suspended", "nonaktif", "diblokir"];
+      return data.get("disabled", false) == true
+        || data.get("isDisabled", false) == true
+        || data.get("isBlocked", false) == true
+        || data.get("isActive", true) == false
+        || data.get("status", "") in ["disabled", "inactive", "blocked", "banned", "suspended", "nonaktif", "diblokir"];
     }
 
     match /users/{uid} {

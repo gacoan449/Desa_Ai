@@ -1,6 +1,6 @@
 # Desa AI
 
-Aplikasi Flutter ruang obrolan AI dengan login Google saja, riwayat chat, pilihan model, plugin, saldo rupiah, dan top-up TriPay. Backend berjalan sebagai **Node.js + Express API di server/VPS**, bukan Firebase Cloud Functions. Firebase tetap dipakai untuk Authentication dan Cloud Firestore; API memakai Firebase Admin SDK untuk memverifikasi token dan mengakses data.
+Aplikasi Flutter ruang obrolan AI dengan login Google saja, riwayat chat, pilihan model, plugin, saldo rupiah, dan top-up TriPay. Backend berjalan sebagai **Node.js + Express API di server/VPS**, bukan Firebase Cloud Functions. Tidak ada deployment atau trigger Firebase Functions; Firebase tetap dipakai hanya untuk Authentication dan Firestore. Firebase tetap dipakai untuk Authentication dan Cloud Firestore; API memakai Firebase Admin SDK untuk memverifikasi token dan mengakses data.
 
 > **Status:** source dan CI sedang diperbaiki. Sebelum dipakai pengguna nyata, wajib memasukkan konfigurasi Firebase yang valid, men-deploy backend Express ke server HTTPS, mengatur secret, dan menguji OpenAI serta TriPay sandbox. Jangan anggap layanan sudah aktif hanya karena APK berhasil dibangun.
 
@@ -30,7 +30,7 @@ Persyaratan: Node.js 20+, Firebase project dengan Authentication dan Firestore a
 
 5. Pasang reverse proxy HTTPS (misalnya Nginx/Caddy) di depan port 8080. Set `PUBLIC_API_BASE_URL` ke URL HTTPS publik tersebut.
 6. Batasi `ALLOWED_ORIGINS` ke origin web yang benar jika web client digunakan. Untuk Android native, request tidak membutuhkan browser origin.
-7. Jalankan `POST /_internal/reconcile` melalui cron setiap 10 menit dengan header `Authorization: Bearer <CRON_SECRET>`. Jangan buka secret cron ke aplikasi.
+7. Jalankan `POST /_internal/reconcile` dan `POST /_internal/reconcile-topups` melalui cron setiap 10 menit dengan header `Authorization: Bearer <CRON_SECRET>`. Endpoint top-up memeriksa status invoice UNPAID melalui TriPay, mencocokkan reference/merchant_ref/nominal, lalu mengkredit PAID secara idempoten. Jangan buka secret cron ke aplikasi.
 8. Daftarkan URL `https://API-ANDA/aiTripayCallback` pada pengaturan callback merchant jika dashboard TriPay memerlukannya. Backend juga mengirim URL callback itu saat membuat invoice.
 
 Variabel server wajib: `OPENAI_API_KEY`, `TRIPAY_API_KEY`, `TRIPAY_MERCHANT_CODE`, `TRIPAY_PRIVATE_KEY`, `PUBLIC_API_BASE_URL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`, dan `CRON_SECRET`. `TRIPAY_SANDBOX` default-nya `true`. Jangan beralih ke transaksi nyata sebelum tes sandbox lulus.

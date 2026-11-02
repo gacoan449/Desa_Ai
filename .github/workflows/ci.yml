@@ -36,13 +36,36 @@ jobs:
           if namespace_count != 1 or app_count != 1:
               raise SystemExit("Could not set Android namespace/applicationId")
           gradle.write_text(source)
+          # Apply Firebase Google Services plugin to the generated Android scaffold.
+          settings = Path("android/settings.gradle.kts")
+          settings_source = settings.read_text()
+          if "com.google.gms.google-services" not in settings_source:
+              settings_source = settings_source.replace("plugins {", "plugins {" + chr(10) + '    id("com.google.gms.google-services") version "4.4.2" apply false', 1)
+          settings.write_text(settings_source)
+          app_gradle = Path("android/app/build.gradle.kts")
+          app_source = app_gradle.read_text()
+          if "id(\\\"com.google.gms.google-services\\\")" not in app_source:
+              app_source = app_source.replace("plugins {", "plugins {" + chr(10) + '    id("com.google.gms.google-services")', 1)
+          app_gradle.write_text(app_source)
+          import json
+          config = json.loads(Path("android/app/google-services.json").read_text())
+          if not any(x.get("client_info", {}).get("android_client_info", {}).get("package_name") == "com.desaai.app" for x in config.get("client", [])):
+              raise SystemExit("google-services.json does not contain Android package com.desaai.app")
           PY
       - name: Remove generated counter-app test
         run: rm -f test/widget_test.dart
       - name: Resolve Flutter dependencies
         run: flutter pub get
+      - name: Upload resolved Flutter lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-flutter-lockfile
+          path: pubspec.lock
+          if-no-files-found: error
       - name: Analyze Dart
         run: flutter analyze --no-pub
+      - name: Compile Android debug APK
+        run: flutter build apk --debug --dart-define=DESA_AI_API_URL=https://api.invalid.local
       - name: Check production release configuration
         id: release_config
         if: github.event_name != 'pull_request'
@@ -60,7 +83,22 @@ jobs:
           fi
           case "$DESAAI_API_BASE_URL" in https://*) ;; *) echo "DESAAI_API_BASE_URL must use HTTPS"; exit 1 ;; esac
           echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
-          keytool -list -keystore android/app/desaai-release.jks -storepass "$DESAAI_KEYSTORE_PASSWORD" -alias "$DESAAI_KEY_ALIAS" >/dev/null
+          keytool -list -v -keystore android/app/desaai-release.jks -storepass "$DESAAI_KEYSTORE_PASSWORD" -alias "$DESAAI_KEY_ALIAS" > /tmp/desaai-signing.txt
+          SIGNING_SHA1="$(awk -F': ' '/SHA1:/{print $2; exit}' /tmp/desaai-signing.txt | tr -d ': ' | tr '[:upper:]' '[:lower:]')"
+          python3 - "$SIGNING_SHA1" <<'PY'
+          import json, sys
+          from pathlib import Path
+          wanted = sys.argv[1]
+          data = json.loads(Path("android/app/google-services.json").read_text())
+          registered = {
+              str(o.get("android_info", {}).get("certificate_hash", "")).replace(":", "").lower()
+              for c in data.get("client", []) for o in c.get("oauth_client", [])
+              if o.get("client_type") == 1
+          }
+          if not wanted or wanted not in registered:
+              raise SystemExit("Signing SHA-1 is not registered in google-services.json. Add it to Firebase Android app, then download the updated google-services.json.")
+          print("Google OAuth signing SHA-1 matches Firebase Android client.")
+          PY
           cat > android/key.properties <<EOF
           storeFile=desaai-release.jks
           storePassword=$DESAAI_KEYSTORE_PASSWORD
@@ -138,6 +176,12 @@ jobs:
           java-version: "21"
       - name: Install backend dependencies
         run: npm install --no-audit --no-fund
+      - name: Upload resolved Node lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-node-lockfile
+          path: functions/package-lock.json
+          if-no-files-found: error
       - name: Check JavaScript syntax
         run: npm run check
       - name: Lint backend
