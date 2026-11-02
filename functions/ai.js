@@ -643,7 +643,9 @@ exports.aiAdminListBillingObligations = onCall({region: REGION, maxInstances: 3}
   return {obligations: snap.docs.map((doc) => {
     const item = doc.data() || {};
     return {id: doc.id, uid: text(item.uid, 128), requestId: text(item.requestId, 80),
-      amountIdr: safeInt(item.amountIdr) || 0, source: text(item.source, 80),
+      amountIdr: safeInt(item.amountIdr) || 0, maxRefundAmountIdr: safeInt(item.maxRefundAmountIdr),
+      type: text(item.type, 60), source: text(item.source, 80),
+      amountVerified: item.amountVerified === true, sourceId: text(item.sourceId, 200),
       createdAtMillis: item.createdAt && typeof item.createdAt.toMillis === "function" ? item.createdAt.toMillis() : null};
   })};
 });
