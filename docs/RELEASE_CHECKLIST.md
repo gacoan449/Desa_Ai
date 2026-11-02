@@ -30,16 +30,20 @@ Encode file keystore menjadi satu baris Base64 sebelum memasukkannya ke secret `
 - [ ] `flutter analyze`
 - [ ] `cd functions && npm install && npm run check && npm run lint`
 - [ ] Jalankan `npm run test:emulator` melalui Firestore Emulator.
+- [ ] Firestore Rules emulator test: baca profil sendiri, larangan lintas pengguna, larangan manipulasi saldo/role, dan larangan tulis ledger/top-up.
+- [ ] Unit test HMAC TriPay, validasi nominal, snapshot harga AI, dan biaya berdasarkan usage provider.
 - [ ] Dua reservasi saldo bersamaan tidak membuat saldo negatif atau ledger ganda.
 - [ ] Review semua perubahan GitHub dan pastikan tidak ada API secret di source, history, APK, atau log.
-- [ ] Pull request hanya menjalankan analyze; release APK hanya dibuat pada push/dispatch ketika URL backend dan signing secrets tersedia.
+- [ ] Pull request menjalankan analyze dan debug build; release APK hanya dibuat pada push/dispatch ketika URL backend dan signing secrets tersedia.
 - [ ] Pastikan APK release memakai `com.desaai.app` dan sertifikat permanen yang sama pada setiap build.
 
 ## C. Autentikasi dan akun
 
+- [ ] Google Services Gradle plugin memproses `android/app/google-services.json`; package harus `com.desaai.app`.
+- [ ] SHA-1 sertifikat APK yang dipakai harus tercantum pada OAuth Android client di `google-services.json`; pipeline release memvalidasi fingerprint sebelum build.
 - [ ] Login Google diuji pada Android dengan SHA-1/SHA-256 keystore permanen.
 - [ ] Profil dibuat dengan saldo tepat Rp0 dan role `user`.
-- [ ] Login/logout bekerja; token kadaluarsa dan kegagalan provisioning profil ditangani.
+- [ ] Login/logout bekerja; token kadaluarsa dan kegagalan provisioning profil ditangani. Jika provisioning gagal, sesi Auth dibatalkan agar AuthGate tidak terjebak pada profil kosong.
 - [ ] Akun blocked/suspended gagal memanggil endpoint chat dan top-up.
 - [ ] Akun dengan `billingHold=true` tidak dapat memakai AI, tetapi tetap dapat melakukan top-up untuk menyelesaikan kewajiban.
 - [ ] Klien tidak bisa mengubah saldo, ledger, usage, ruang chat, pesan, atau payment records.
@@ -73,6 +77,8 @@ Encode file keystore menjadi satu baris Base64 sebelum memasukkannya ke secret `
 - [ ] Admin memverifikasi nominal refund di dashboard TriPay, lalu mengirim verifiedRefundAmountIdr, providerVerifiedRefundAmount=true, providerVerificationReference (ID/catatan pemeriksaan), dan alasan audit untuk pembalikan idempoten.
 - [ ] Jika saldo tidak cukup untuk pembalikan refund, kewajiban tetap terbuka dan penggunaan AI ditahan.
 - [ ] Callback FAILED/EXPIRED tidak mengkredit.
+- [ ] Rate limit top-up: maksimal 3 pembuatan invoice per akun dalam 10 menit.
+- [ ] Cron `/ _internal/reconcile-topups` (tanpa spasi pada URL) memeriksa invoice UNPAID ke endpoint detail TriPay dan mengkredit PAID secara idempoten.
 - [ ] Callback status terminal yang bertentangan ditolak untuk pemeriksaan.
 - [ ] `TRIPAY_SANDBOX=true` sampai seluruh tes sandbox selesai.
 - [ ] Rekonsiliasi transaksi provider dan ledger dilakukan sebelum transaksi real.
