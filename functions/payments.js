@@ -144,6 +144,12 @@ exports.aiCreateTopupPayment = onCall({
     await activeRef.set({status: "CREATE_UNKNOWN", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
     throw new HttpsError("unavailable", "Status pembuatan tagihan belum pasti. Jangan membuat pembayaran ulang; hubungi bantuan untuk pemeriksaan.");
   }
+  if (!createdResponse.ok && createdResponse.status >= 500) {
+    await topupRef.set({status: "CREATE_UNKNOWN", providerHttpStatus: createdResponse.status,
+      reconciliationReason: "Provider 5xx; invoice outcome is ambiguous.", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    await activeRef.set({status: "CREATE_UNKNOWN", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    throw new HttpsError("unavailable", "Status pembuatan tagihan belum pasti. Jangan membuat pembayaran ulang; hubungi bantuan untuk pemeriksaan.");
+  }
   if (!createdResponse.ok || created.success !== true || !created.data) {
     await topupRef.set({status: "CREATE_FAILED", providerHttpStatus: createdResponse.status, updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
     await db.runTransaction(async (tx) => {
@@ -258,13 +264,13 @@ exports.aiTripayCallback = onRequest({
 
       if (status === "REFUND") {
         if (["REFUNDED", "REFUNDED_UNCREDITED"].includes(topup.status)) return {alreadyRefunded: true};
+        if (topup.status === "REFUND_NEEDS_REVIEW") return {alreadyPendingReview: true};
         if (topup.status !== "PAID" || topup.credited !== true) {
           tx.update(topupRef, {reference, amount: totalAmount, totalAmount, status: "REFUNDED_UNCREDITED",
             refunded: true, refundedAt: now, updatedAt: now});
           if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
           return {credited: false, refunded: false, status: "REFUNDED_UNCREDITED"};
         }
-        if (topup.status === "REFUND_NEEDS_REVIEW") return {alreadyPendingReview: true};
         if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
         const creditAmount = safeInt(topup.creditedAmount || topup.creditAmount || topup.packageAmount);
         const before = safeInt((userSnap.data() || {}).balance);
