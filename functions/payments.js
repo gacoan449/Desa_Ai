@@ -35,6 +35,21 @@ function sandbox() {
 function apiBase() {
   return sandbox() ? "https://tripay.co.id/api-sandbox" : "https://tripay.co.id/api";
 }
+
+async function enforceTopupRateLimit(uid) {
+  const ref = db.collection("topup_rate_limits").doc(uid);
+  const nowMs = Date.now();
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const previous = snap.exists && Array.isArray(snap.data().times) ? snap.data().times : [];
+    const recent = previous.filter((time) => Number.isSafeInteger(time) && time > nowMs - 10 * 60 * 1000);
+    if (recent.length >= 3) {
+      throw new HttpsError("resource-exhausted", "Batas pembuatan top-up tercapai. Coba lagi setelah 10 menit.");
+    }
+    recent.push(nowMs);
+    tx.set(ref, {times: recent, updatedAt: admin.firestore.FieldValue.serverTimestamp()});
+  });
+}
 async function getUser(uid) {
   const ref = db.collection("users").doc(uid);
   const snap = await ref.get();
@@ -94,6 +109,7 @@ exports.aiCreateTopupPayment = onCall({
 }, async (request) => {
   const uid = requireUid(request);
   const {user} = await getUser(uid);
+  await enforceTopupRateLimit(uid);
   const amount = safeInt(request.data && request.data.amount);
   const method = clean(request.data && request.data.method, 50).toUpperCase();
   const email = clean((request.data && request.data.email) || user.email || (request.auth.token && request.auth.token.email), 200);
@@ -359,3 +375,6 @@ exports.aiTripayCallback = onRequest({
     return reply(err.message === "TOPUP_NOT_FOUND" ? 404 : 409, {success: false, message: "Callback belum dapat diproses; akan dicoba ulang."});
   }
 });
+
+
+exports.__test = {validSignature, clean, safeInt};
