@@ -15,6 +15,7 @@ for (const name of ["aiGetConfig","aiCreateRoom","aiRenameRoom","aiDeleteRoom","
 app.post("/aiChatStream",handlers.aiChatStream);
 app.post("/aiTripayCallback",handlers.aiTripayCallback);
 app.post("/_internal/reconcile",handlers.aiReconcilePending);
+app.post("/_internal/reconcile-topups",handlers.aiReconcileTopups);
 app.use((error,_req,res,_next)=>{console.error("HTTP request failed",error.message);if(!res.headersSent)res.status(500).json({message:"Terjadi kesalahan pada server."});});
 if(require.main===module) app.listen(port,"0.0.0.0",()=>console.info("Desa AI API listening on "+port));
 module.exports=app;
