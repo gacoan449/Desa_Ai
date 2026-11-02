@@ -64,6 +64,16 @@ jobs:
           if-no-files-found: error
       - name: Analyze Dart
         run: flutter analyze --no-pub
+      - name: Prepare stable Android debug signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA -keysize 2048 -validity 10000
+          fi
       - name: Build installable Android debug APK
         env:
           DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
@@ -71,8 +81,10 @@ jobs:
           flutter build apk --debug --dart-define=DESA_AI_API_URL="$DESAAI_API_BASE_URL"
           mkdir -p build/diagnostics
           keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey > build/diagnostics/debug-signing.txt
-          awk -F': ' '/SHA1:/{print "Debug APK SHA-1: " $2} /SHA256:/{print "Debug APK SHA-256: " $2}' build/diagnostics/debug-signing.txt > build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
-          cat build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+          grep -E 'SHA1:|SHA256:' build/diagnostics/debug-signing.txt > build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+          grep -q 'SHA1:' build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+          grep -q 'SHA256:' build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+          sed 's/^/Debug APK /' build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
