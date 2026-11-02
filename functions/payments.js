@@ -104,15 +104,16 @@ exports.aiCreateTopupPayment = onCall({
     const activeSnap = await tx.get(activeRef);
     if (activeSnap.exists) {
       const active = activeSnap.data() || {};
-      const stillOpen = ["CREATING", "CREATE_UNKNOWN"].includes(active.status) ||
-        (active.status === "UNPAID" && (safeInt(active.expiresAt) || 0) > nowSeconds);
+      const expiresAt = safeInt(active.expiresAt) || 0;
+      const stillOpen = active.status === "CREATE_UNKNOWN" ||
+        (["CREATING", "UNPAID"].includes(active.status) && expiresAt > nowSeconds);
       if (stillOpen) throw new HttpsError("already-exists", "Masih ada tagihan top-up aktif. Selesaikan atau tunggu kedaluwarsa sebelum membuat tagihan baru.");
     }
     const now = admin.firestore.FieldValue.serverTimestamp();
     tx.create(topupRef, {uid, merchantRef, reference: null, requestedAmount: amount, packageAmount: amount,
       creditAmount: amount, totalAmount: null, status: "CREATING", credited: false, source: "AI_TOPUP",
       paymentMethod: method, createdAt: now, updatedAt: now});
-    tx.set(activeRef, {merchantRef, status: "CREATING", expiresAt: nowSeconds + 86400, updatedAt: now});
+    tx.set(activeRef, {merchantRef, status: "CREATING", expiresAt: nowSeconds + 120, updatedAt: now});
   });
   const signature = crypto.createHmac("sha256", privateKey).update(merchantCode + merchantRef + amount).digest("hex");
   const form = new URLSearchParams();
