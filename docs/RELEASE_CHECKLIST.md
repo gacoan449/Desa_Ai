@@ -8,7 +8,7 @@ Gunakan project Firebase staging dan kredensial TriPay sandbox terlebih dahulu. 
 - [ ] Aktifkan Firebase Authentication > Google provider.
 - [ ] Pastikan Android app `com.desaai.app` terdaftar di Firebase.
 - [ ] Buat/ambil keystore permanen. Jika aplikasi pernah didistribusikan, gunakan upload key yang sesuai dengan konfigurasi Play Console; jangan membuat key baru sembarangan.
-- [ ] Daftarkan SHA-1 dan SHA-256 dari keystore permanen ke Firebase Console > Project settings > Android app.
+- [ ] Daftarkan SHA-1 dan SHA-256 dari keystore permanen ke Firebase Console > Project settings > Android app. Client OAuth Web untuk Google Sign-In sudah ditentukan eksplisit pada aplikasi; fingerprint Android tetap harus cocok.
 - [ ] Tambahkan GitHub Actions secrets: `DESAAI_API_BASE_URL`, `DESAAI_KEYSTORE_BASE64`, `DESAAI_KEYSTORE_PASSWORD`, `DESAAI_KEY_ALIAS`, `DESAAI_KEY_PASSWORD`.
 - [ ] `DESAAI_API_BASE_URL` harus URL HTTPS backend Express yang benar, tanpa `example.invalid`.
 - [ ] Jangan commit file keystore, key.properties, service-account JSON, .env, atau rahasia provider.
@@ -90,3 +90,5 @@ Encode file keystore menjadi satu baris Base64 sebelum memasukkannya ke secret `
 
 - `POST /aiAdminListBillingObligations` — daftar kewajiban terbuka.
 - `POST /aiAdminSettleBillingObligation` — selesaikan kewajiban setelah saldo cukup; wajib menyertakan alasan audit minimal 20 karakter.
+- `POST /aiAdminListPendingTopups` — daftar invoice dengan status pembuatan tidak pasti.
+- `POST /aiAdminResolveUnknownTopup` — tutup invoice tidak pasti hanya setelah admin memverifikasi ke TriPay bahwa invoice memang tidak pernah dibuat.
