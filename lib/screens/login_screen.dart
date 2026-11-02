@@ -75,7 +75,10 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (error) {
       if (mounted) {
         setState(() {
-          _error = 'Login Google gagal. Periksa provider Google dan OAuth Firebase. $error';
+          final detail = error.toString();
+          _error = detail.contains('c3: 10') || detail.contains('DEVELOPER_ERROR')
+              ? 'Google menolak konfigurasi Android (kode 10). Periksa SHA-1 sertifikat APK dan package com.desaai.app pada Firebase.'
+              : 'Login Google gagal. $detail';
         });
       }
     } finally {
