@@ -136,3 +136,5 @@ jobs:
         run: npm run check
       - name: Lint backend
         run: npm run lint
+      - name: Test financial transactions in Firestore Emulator
+        run: npx --yes firebase-tools emulators:exec --only firestore --project demo-desa-ai-p0 --config ../firebase.json "npm run test:emulator"
