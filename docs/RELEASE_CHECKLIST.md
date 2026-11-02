@@ -70,7 +70,7 @@ Encode file keystore menjadi satu baris Base64 sebelum memasukkannya ke secret `
 - [ ] Callback HMAC, reference, dan nominal diverifikasi.
 - [ ] Callback PAID berulang hanya mengkredit satu kali.
 - [ ] Callback REFUND setelah PAID membuat kewajiban pemeriksaan; callback TriPay tidak menyediakan field nominal refund terpisah, jadi nominal tidak boleh ditebak.
-- [ ] Admin memverifikasi nominal refund di dashboard TriPay, lalu mengirim verifiedRefundAmountIdr dan providerVerifiedRefundAmount=true untuk pembalikan idempoten.
+- [ ] Admin memverifikasi nominal refund di dashboard TriPay, lalu mengirim verifiedRefundAmountIdr, providerVerifiedRefundAmount=true, providerVerificationReference (ID/catatan pemeriksaan), dan alasan audit untuk pembalikan idempoten.
 - [ ] Jika saldo tidak cukup untuk pembalikan refund, kewajiban tetap terbuka dan penggunaan AI ditahan.
 - [ ] Callback FAILED/EXPIRED tidak mengkredit.
 - [ ] Callback status terminal yang bertentangan ditolak untuk pemeriksaan.
