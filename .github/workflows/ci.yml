@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   flutter:
-    name: Flutter analyze and Android release APKs
+    name: Flutter analyze and Android release APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,77 +22,22 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Generate Android platform files for CI
+      - name: Generate Android platform files
         run: flutter create --platforms=android --project-name desa_ai .
-      - name: Configure permanent release signing (when GitHub secrets are set)
-        env:
-          DESAAI_KEYSTORE_BASE64: ${{ secrets.DESAAI_KEYSTORE_BASE64 }}
-          DESAAI_KEYSTORE_PASSWORD: ${{ secrets.DESAAI_KEYSTORE_PASSWORD }}
-          DESAAI_KEY_ALIAS: ${{ secrets.DESAAI_KEY_ALIAS }}
-          DESAAI_KEY_PASSWORD: ${{ secrets.DESAAI_KEY_PASSWORD }}
+      - name: Set the registered Android application ID
         run: |
-          if [ -z "$DESAAI_KEYSTORE_BASE64" ]; then
-            echo "Permanent release key not configured; using Flutter's default signing for this build."
-            exit 0
-          fi
-          test -n "$DESAAI_KEYSTORE_PASSWORD"
-          test -n "$DESAAI_KEY_ALIAS"
-          test -n "$DESAAI_KEY_PASSWORD"
-          echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
           python3 - <<'PY'
           from pathlib import Path
-          import base64
-          import os
           import re
-          # Keep signing values in a runner-local, base64-encoded Gradle properties file.
-          props = Path("android/gradle.properties")
-          with props.open("a") as out:
-              for key in ("DESAAI_KEYSTORE_PASSWORD", "DESAAI_KEY_ALIAS", "DESAAI_KEY_PASSWORD"):
-                  value = base64.b64encode(os.environ[key].encode()).decode()
-                  out.write("\n" + key + "_B64=" + value + "\n")
-          candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
-          gradle = next((p for p in candidates if p.exists()), None)
-          if gradle is None:
-              raise SystemExit("Could not find android/app/build.gradle(.kts)")
-          s = gradle.read_text()
-          if gradle.suffix == ".kts":
-              if "import java.util.Base64" not in s:
-                  s = "import java.util.Base64" + chr(10) + "import java.nio.charset.StandardCharsets" + chr(10) + s
-              signing = '''
-              signingConfigs {
-                  create("desaAiRelease") {
-                      storeFile = file("desaai-release.jks")
-                      storePassword = String(Base64.getDecoder().decode(project.property("DESAAI_KEYSTORE_PASSWORD_B64") as String), StandardCharsets.UTF_8)
-                      keyAlias = String(Base64.getDecoder().decode(project.property("DESAAI_KEY_ALIAS_B64") as String), StandardCharsets.UTF_8)
-                      keyPassword = String(Base64.getDecoder().decode(project.property("DESAAI_KEY_PASSWORD_B64") as String), StandardCharsets.UTF_8)
-                  }
-              }
-          '''
-              if 'create("desaAiRelease")' not in s:
-                  s, n = re.subn(r'(?m)^([ \t]*)buildTypes\s*\{', signing + r'\n\1buildTypes {', s, count=1)
-                  if n != 1:
-                      raise SystemExit("Could not add release signing config to Kotlin Gradle file")
-              s = s.replace('signingConfig = signingConfigs.getByName("debug")',
-                            'signingConfig = signingConfigs.getByName("desaAiRelease")')
-          else:
-              signing = '''
-              signingConfigs {
-                  desaAiRelease {
-                      storeFile file("desaai-release.jks")
-                      storePassword new String(Base64.decoder.decode(project.property("DESAAI_KEYSTORE_PASSWORD_B64")), "UTF-8")
-                      keyAlias new String(Base64.decoder.decode(project.property("DESAAI_KEY_ALIAS_B64")), "UTF-8")
-                      keyPassword new String(Base64.decoder.decode(project.property("DESAAI_KEY_PASSWORD_B64")), "UTF-8")
-                  }
-              }
-          '''
-              if "desaAiRelease {" not in s:
-                  s, n = re.subn(r'(?m)^([ \t]*)buildTypes\s*\{', signing + r'\n\1buildTypes {', s, count=1)
-                  if n != 1:
-                      raise SystemExit("Could not add release signing config to Groovy Gradle file")
-              s = s.replace('signingConfig signingConfigs.debug',
-                            'signingConfig signingConfigs.desaAiRelease')
-          gradle.write_text(s)
-          print(f"Configured permanent release signing in {gradle}")
+          gradle = Path("android/app/build.gradle.kts")
+          if not gradle.exists():
+              raise SystemExit("Expected Kotlin Gradle file was not generated")
+          source = gradle.read_text()
+          source, namespace_count = re.subn(r'namespace\s*=\s*"[^"]+"', 'namespace = "com.desaai.app"', source, count=1)
+          source, app_count = re.subn(r'applicationId\s*=\s*"[^"]+"', 'applicationId = "com.desaai.app"', source, count=1)
+          if namespace_count != 1 or app_count != 1:
+              raise SystemExit("Could not set Android namespace/applicationId")
+          gradle.write_text(source)
           PY
       - name: Remove generated counter-app test
         run: rm -f test/widget_test.dart
@@ -100,17 +45,78 @@ jobs:
         run: flutter pub get
       - name: Analyze Dart
         run: flutter analyze --no-pub
-      - name: Build split release APKs
-        run: flutter build apk --release --split-per-abi --dart-define=DESA_AI_API_URL=https://example.invalid
-      - name: Print actual APK signing certificate fingerprints
+      - name: Require production release configuration
+        if: github.event_name != 'pull_request'
+        env:
+          DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
+          DESAAI_KEYSTORE_BASE64: ${{ secrets.DESAAI_KEYSTORE_BASE64 }}
+          DESAAI_KEYSTORE_PASSWORD: ${{ secrets.DESAAI_KEYSTORE_PASSWORD }}
+          DESAAI_KEY_ALIAS: ${{ secrets.DESAAI_KEY_ALIAS }}
+          DESAAI_KEY_PASSWORD: ${{ secrets.DESAAI_KEY_PASSWORD }}
+        run: |
+          test -n "$DESAAI_API_BASE_URL" || { echo "Missing DESAAI_API_BASE_URL secret"; exit 1; }
+          case "$DESAAI_API_BASE_URL" in https://*) ;; *) echo "DESAAI_API_BASE_URL must use HTTPS"; exit 1 ;; esac
+          test -n "$DESAAI_KEYSTORE_BASE64" || { echo "Missing DESAAI_KEYSTORE_BASE64 secret"; exit 1; }
+          test -n "$DESAAI_KEYSTORE_PASSWORD" || { echo "Missing DESAAI_KEYSTORE_PASSWORD secret"; exit 1; }
+          test -n "$DESAAI_KEY_ALIAS" || { echo "Missing DESAAI_KEY_ALIAS secret"; exit 1; }
+          test -n "$DESAAI_KEY_PASSWORD" || { echo "Missing DESAAI_KEY_PASSWORD secret"; exit 1; }
+          echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
+          keytool -list -keystore android/app/desaai-release.jks -storepass "$DESAAI_KEYSTORE_PASSWORD" -alias "$DESAAI_KEY_ALIAS" >/dev/null
+          cat > android/key.properties <<EOF
+          storeFile=app/desaai-release.jks
+          storePassword=$DESAAI_KEYSTORE_PASSWORD
+          keyAlias=$DESAAI_KEY_ALIAS
+          keyPassword=$DESAAI_KEY_PASSWORD
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          gradle = Path("android/app/build.gradle.kts")
+          source = gradle.read_text()
+          if "import java.util.Properties" not in source:
+              source = "import java.util.Properties\nimport java.io.FileInputStream\n" + source
+          if 'create("desaAiRelease")' not in source:
+              signing = '''
+          val signingProperties = Properties().apply {
+              load(FileInputStream(rootProject.file("key.properties")))
+          }
+          '''
+              source = signing + source
+              block = '''
+              signingConfigs {
+                  create("desaAiRelease") {
+                      storeFile = file(signingProperties["storeFile"] as String)
+                      storePassword = signingProperties["storePassword"] as String
+                      keyAlias = signingProperties["keyAlias"] as String
+                      keyPassword = signingProperties["keyPassword"] as String
+                  }
+              }
+          '''
+              source, count = re.subn(r'(?m)^([ \t]*)buildTypes\s*\{', block + r'\n\1buildTypes {', source, count=1)
+              if count != 1:
+                  raise SystemExit("Could not insert permanent signing config")
+          source, count = re.subn(r'signingConfig\s*=\s*signingConfigs\.getByName\("debug"\)',
+                                 'signingConfig = signingConfigs.getByName("desaAiRelease")', source, count=1)
+          if count != 1:
+              raise SystemExit("Could not bind release build to permanent signing key")
+          gradle.write_text(source)
+          PY
+      - name: Build signed split release APKs
+        if: github.event_name != 'pull_request'
+        env:
+          DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
+        run: flutter build apk --release --split-per-abi --dart-define=DESA_AI_API_URL="$DESAAI_API_BASE_URL"
+      - name: Verify release APK signatures
+        if: github.event_name != 'pull_request'
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
           for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
             echo "=== $apk ==="
-            "$APKSIGNER" verify --print-certs "$apk"
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
           done
-      - name: Upload release APKs
+      - name: Upload signed release APKs
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: desa-ai-release-apks
