@@ -270,6 +270,11 @@ exports.aiAdminResolveUnknownTopup = onCall({region: REGION, maxInstances: 3}, a
 
 exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxInstances: 2, secrets: [TRIPAY_API_KEY]}, async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({success: false});
+  const expectedCron = String(process.env.CRON_SECRET || "");
+  const suppliedCron = String(req.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  if (!expectedCron || !suppliedCron || !crypto.timingSafeEqual(Buffer.from(expectedCron), Buffer.from(suppliedCron))) {
+    return res.status(401).json({success: false, message: "Unauthorized"});
+  }
   const apiKey = TRIPAY_API_KEY.value();
   if (!apiKey) return res.status(503).json({success: false, message: "TriPay API key belum tersedia."});
   const snap = await db.collection("topup_transactions").where("status", "==", "UNPAID").limit(25).get();
@@ -297,7 +302,10 @@ exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxI
         const ledgerRef = db.collection("balance_ledger").doc(ledgerId);
         const mutationRef = db.collection("mutasi_saldo").doc(ledgerId);
         const outcome = await db.runTransaction(async (tx) => {
-          const [currentSnap, userSnap, ledgerSnap] = await Promise.all([tx.get(doc.ref), tx.get(userRef), tx.get(ledgerRef)]);
+          const lockRef = db.collection("topup_active").doc(String(item.uid || ""));
+          const [currentSnap, userSnap, ledgerSnap, lockSnap] = await Promise.all([
+            tx.get(doc.ref), tx.get(userRef), tx.get(ledgerRef), tx.get(lockRef)
+          ]);
           if (!currentSnap.exists) return "MISSING";
           const current = currentSnap.data() || {};
           if (current.status === "PAID" && current.credited === true) return "ALREADY_CREDITED";
@@ -317,8 +325,6 @@ exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxI
             merchantRef, reference, waktu: now});
           tx.update(doc.ref, {status: "PAID", credited: true, creditedAmount: amount, totalAmount: safeInt(provider.total_amount),
             amount: safeInt(provider.total_amount), paidAt: now, reconciledAt: now, updatedAt: now});
-          const lockRef = db.collection("topup_active").doc(String(current.uid || ""));
-          const lockSnap = await tx.get(lockRef);
           if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
           return "CREDITED";
         });
