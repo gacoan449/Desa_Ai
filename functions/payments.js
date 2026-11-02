@@ -268,6 +268,83 @@ exports.aiAdminResolveUnknownTopup = onCall({region: REGION, maxInstances: 3}, a
   });
 });
 
+exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxInstances: 2, secrets: [TRIPAY_API_KEY]}, async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({success: false});
+  const apiKey = TRIPAY_API_KEY.value();
+  if (!apiKey) return res.status(503).json({success: false, message: "TriPay API key belum tersedia."});
+  const snap = await db.collection("topup_transactions").where("status", "==", "UNPAID").limit(25).get();
+  const results = [];
+  for (const doc of snap.docs) {
+    const item = doc.data() || {};
+    const reference = clean(item.reference, 200);
+    const merchantRef = clean(item.merchantRef || doc.id, 200);
+    if (!reference || !merchantRef) continue;
+    try {
+      const url = apiBase() + "/transaction/detail?reference=" + encodeURIComponent(reference);
+      const response = await fetch(url, {headers: {Authorization: "Bearer " + apiKey, Accept: "application/json},
+        signal: AbortSignal.timeout(12000)});
+      const body = await response.json().catch(() => ({}));
+      const provider = body.data || {};
+      if (!response.ok || body.success !== true || provider.reference !== reference ||
+          provider.merchant_ref !== merchantRef || safeInt(provider.total_amount) !== safeInt(item.totalAmount)) {
+        results.push({merchantRef, outcome: "MISMATCH_OR_UNAVAILABLE"});
+        continue;
+      }
+      const status = clean(provider.status, 30).toUpperCase();
+      if (status === "PAID") {
+        const userRef = db.collection("users").doc(String(item.uid || ""));
+        const ledgerId = "tripay_" + crypto.createHash("sha256").update(merchantRef).digest("hex");
+        const ledgerRef = db.collection("balance_ledger").doc(ledgerId);
+        const mutationRef = db.collection("mutasi_saldo").doc(ledgerId);
+        const outcome = await db.runTransaction(async (tx) => {
+          const [currentSnap, userSnap, ledgerSnap] = await Promise.all([tx.get(doc.ref), tx.get(userRef), tx.get(ledgerRef)]);
+          if (!currentSnap.exists) return "MISSING";
+          const current = currentSnap.data() || {};
+          if (current.status === "PAID" && current.credited === true) return "ALREADY_CREDITED";
+          if (["REFUNDED", "REFUNDED_PARTIAL", "REFUNDED_UNCREDITED", "REFUND_NEEDS_REVIEW", "FAILED", "EXPIRED"].includes(current.status)) return "TERMINAL_CONFLICT";
+          if (!userSnap.exists || ledgerSnap.exists) return "REVIEW_REQUIRED";
+          const amount = safeInt(current.creditAmount || current.packageAmount);
+          const before = safeInt((userSnap.data() || {}).balance);
+          if (!amount || amount < 1 || before === null || before < 0 || !Number.isSafeInteger(before + amount)) return "REVIEW_REQUIRED";
+          const after = before + amount;
+          const now = admin.firestore.FieldValue.serverTimestamp();
+          tx.update(userRef, {balance: after, updatedAt: now});
+          tx.create(ledgerRef, {uid: current.uid, type: "CREDIT", amount, before, after,
+            reason: "Rekonsiliasi top-up TriPay PAID", source: "AI_TOPUP_TRIPAY_RECONCILIATION",
+            merchantRef, reference, createdAt: now});
+          tx.create(mutationRef, {uid: current.uid, tipe: "MASUK", nominal: amount, saldoAwal: before, saldoAkhir: after,
+            keterangan: "Rekonsiliasi top-up Desa AI via TriPay", sumber: "AI_TOPUP_TRIPAY_RECONCILIATION",
+            merchantRef, reference, waktu: now});
+          tx.update(doc.ref, {status: "PAID", credited: true, creditedAmount: amount, totalAmount: safeInt(provider.total_amount),
+            amount: safeInt(provider.total_amount), paidAt: now, reconciledAt: now, updatedAt: now});
+          const lockRef = db.collection("topup_active").doc(String(current.uid || ""));
+          const lockSnap = await tx.get(lockRef);
+          if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
+          return "CREDITED";
+        });
+        results.push({merchantRef, outcome});
+      } else if (["FAILED", "EXPIRED"].includes(status)) {
+        await db.runTransaction(async (tx) => {
+          const [currentSnap, lockSnap] = await Promise.all([
+            tx.get(doc.ref), tx.get(db.collection("topup_active").doc(String(item.uid || "")))
+          ]);
+          if (!currentSnap.exists || currentSnap.data().status !== "UNPAID") return;
+          const now = admin.firestore.FieldValue.serverTimestamp();
+          tx.update(doc.ref, {status, reconciledAt: now, updatedAt: now});
+          if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(db.collection("topup_active").doc(String(item.uid || "")));
+        });
+        results.push({merchantRef, outcome: status});
+      } else {
+        results.push({merchantRef, outcome: "STILL_" + (status || "UNKNOWN")});
+      }
+    } catch (error) {
+      logger.warn("TriPay reconciliation failed", {merchantRef, message: error.message});
+      results.push({merchantRef, outcome: "RETRY"});
+    }
+  }
+  return res.status(200).json({success: true, checked: results.length, results});
+});
+
 function validSignature(raw, received, secret) {
   if (!raw || !received || !secret) return false;
   const expected = crypto.createHmac("sha256", secret).update(raw).digest();
