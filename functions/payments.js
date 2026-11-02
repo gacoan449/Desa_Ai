@@ -272,7 +272,10 @@ exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxI
   if (req.method !== "POST") return res.status(405).json({success: false});
   const expectedCron = String(process.env.CRON_SECRET || "");
   const suppliedCron = String(req.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
-  if (!expectedCron || !suppliedCron || !crypto.timingSafeEqual(Buffer.from(expectedCron), Buffer.from(suppliedCron))) {
+  const expectedBytes = Buffer.from(expectedCron);
+  const suppliedBytes = Buffer.from(suppliedCron);
+  if (!expectedCron || !suppliedCron || expectedBytes.length !== suppliedBytes.length ||
+      !crypto.timingSafeEqual(expectedBytes, suppliedBytes)) {
     return res.status(401).json({success: false, message: "Unauthorized"});
   }
   const apiKey = TRIPAY_API_KEY.value();
