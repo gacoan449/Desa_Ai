@@ -652,6 +652,8 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
   await requireAdmin(adminUid);
   const id = text(request.data && request.data.obligationId, 160);
   const reason = text(request.data && request.data.reason, 500);
+  const providerVerifiedRefundAmount = request.data && request.data.providerVerifiedRefundAmount === true;
+  const verifiedRefundAmountIdr = safeInt(request.data && request.data.verifiedRefundAmountIdr);
   if (!id || reason.length < 20) throw new HttpsError("invalid-argument", "ID kewajiban dan alasan audit minimal 20 karakter wajib diisi.");
   const obligation = db.collection("ai_billing_obligations").doc(id);
   return db.runTransaction(async (tx) => {
@@ -672,7 +674,15 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
     ]);
     if (!userSnap.exists) throw new HttpsError("not-found", "Profil pengguna tidak ditemukan.");
     if (ledgerSnap.exists) throw new HttpsError("already-exists", "Ledger kewajiban sudah ada; periksa transaksi.");
-    const amount = safeInt(item.amountIdr);
+    let amount = safeInt(item.amountIdr);
+    if (item.type === "TRIPAY_REFUND") {
+      const maximum = safeInt(item.maxRefundAmountIdr);
+      if (!providerVerifiedRefundAmount || verifiedRefundAmountIdr === null ||
+          verifiedRefundAmountIdr < 1 || maximum === null || verifiedRefundAmountIdr > maximum) {
+        throw new HttpsError("failed-precondition", "Nominal refund TriPay harus diverifikasi di dashboard provider dan dikirim sebagai verifiedRefundAmountIdr.");
+      }
+      amount = verifiedRefundAmountIdr;
+    }
     const before = safeInt((userSnap.data() || {}).balance);
     if (!amount || amount < 1 || before === null || before < amount) throw new HttpsError("failed-precondition", "Saldo pengguna belum mencukupi untuk menyelesaikan kewajiban.");
     const after = before - amount;
@@ -683,10 +693,14 @@ exports.aiAdminSettleBillingObligation = onCall({region: REGION, maxInstances: 3
     tx.create(mutationRef, {uid: item.uid, tipe: "KELUAR", nominal: amount, saldoAwal: before, saldoAkhir: after,
       keterangan: "Penyelesaian kewajiban AI", sumber: "AI_BILLING_OBLIGATION_SETTLEMENT",
       obligationId: id, reviewedBy: adminUid, reviewReason: reason, waktu: now});
-    tx.update(obligation, {status: "SETTLED", settledBy: adminUid, settlementReason: reason, settledAt: now, updatedAt: now});
+    tx.update(obligation, {status: "SETTLED", amountIdr: amount,
+      amountVerified: item.type === "TRIPAY_REFUND" ? true : (item.amountVerified || false),
+      settledBy: adminUid, settlementReason: reason, settledAt: now, updatedAt: now});
     if (sourceTopupRef && sourceTopupSnap && sourceTopupSnap.exists) {
-      tx.update(sourceTopupRef, {status: "REFUNDED", refunded: true, refundPending: false,
-        refundedAt: now, refundSettledBy: adminUid, refundSettlementReason: reason, updatedAt: now});
+      const maximumRefund = safeInt(item.maxRefundAmountIdr) || amount;
+      tx.update(sourceTopupRef, {status: amount < maximumRefund ? "REFUNDED_PARTIAL" : "REFUNDED",
+        refunded: true, refundPending: false, refundAmount: amount, refundedAt: now,
+        refundSettledBy: adminUid, refundSettlementReason: reason, updatedAt: now});
     }
     return {success: true, amountIdr: amount, remainingBalanceIdr: after, billingHold: openSnap.size > 1};
   });
