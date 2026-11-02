@@ -56,6 +56,12 @@ jobs:
         run: rm -f test/widget_test.dart
       - name: Resolve Flutter dependencies
         run: flutter pub get
+      - name: Upload resolved Flutter lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-flutter-lockfile
+          path: pubspec.lock
+          if-no-files-found: error
       - name: Analyze Dart
         run: flutter analyze --no-pub
       - name: Compile Android debug APK
@@ -170,6 +176,12 @@ jobs:
           java-version: "21"
       - name: Install backend dependencies
         run: npm install --no-audit --no-fund
+      - name: Upload resolved Node lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-node-lockfile
+          path: functions/package-lock.json
+          if-no-files-found: error
       - name: Check JavaScript syntax
         run: npm run check
       - name: Lint backend
