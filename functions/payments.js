@@ -219,7 +219,6 @@ exports.aiAdminResolveUnknownTopup = onCall({region: REGION, maxInstances: 3}, a
     throw new HttpsError("invalid-argument", "Merchant reference, alasan audit minimal 20 karakter, dan verifikasi provider bahwa invoice tidak ada wajib diisi.");
   }
   const topupRef = db.collection("topup_transactions").doc(merchantRef);
-  const lockRef = db.collection("topup_active").doc("");
   return db.runTransaction(async (tx) => {
     const topupSnap = await tx.get(topupRef);
     if (!topupSnap.exists) throw new HttpsError("not-found", "Catatan top-up tidak ditemukan.");
