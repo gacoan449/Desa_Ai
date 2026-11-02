@@ -43,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_busy) return;
     setState(() { _busy = true; _error = null; });
     try {
-      final googleUser = await GoogleSignIn(scopes: const ['email']).signIn();
+      final googleUser = await GoogleSignIn(serverClientId: '295144083758-afasfbkh7i2qbsebg389nke2htk34p9s.apps.googleusercontent.com', scopes: const ['email']).signIn();
       if (googleUser == null) {
         return;
       }
