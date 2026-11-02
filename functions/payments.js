@@ -194,6 +194,49 @@ exports.aiCreateTopupPayment = onCall({
     total_amount: totalAmount, fee_admin: safeInt(invoice.fee_customer) || 0, expired_time: expiresAt};
 });
 
+exports.aiAdminListPendingTopups = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const uid = requireUid(request);
+  const {user} = await getUser(uid);
+  if (user.role !== "admin") throw new HttpsError("permission-denied", "Akses hanya untuk admin.");
+  const snap = await db.collection("topup_transactions").where("status", "in", ["CREATING", "CREATE_UNKNOWN"]).limit(100).get();
+  return {pending: snap.docs.map((doc) => {
+    const item = doc.data() || {};
+    return {merchantRef: doc.id, uid: clean(item.uid, 128), status: clean(item.status, 40),
+      packageAmount: safeInt(item.packageAmount) || 0, reference: clean(item.reference, 200),
+      reconciliationReason: clean(item.reconciliationReason, 300),
+      createdAtMillis: item.createdAt && typeof item.createdAt.toMillis === "function" ? item.createdAt.toMillis() : null};
+  })};
+});
+
+exports.aiAdminResolveUnknownTopup = onCall({region: REGION, maxInstances: 3}, async (request) => {
+  const adminUid = requireUid(request);
+  const {user} = await getUser(adminUid);
+  if (user.role !== "admin") throw new HttpsError("permission-denied", "Akses hanya untuk admin.");
+  const merchantRef = clean(request.data && request.data.merchantRef, 200);
+  const reason = clean(request.data && request.data.reason, 500);
+  const verified = request.data && request.data.providerVerifiedNoInvoice === true;
+  if (!merchantRef || reason.length < 20 || !verified) {
+    throw new HttpsError("invalid-argument", "Merchant reference, alasan audit minimal 20 karakter, dan verifikasi provider bahwa invoice tidak ada wajib diisi.");
+  }
+  const topupRef = db.collection("topup_transactions").doc(merchantRef);
+  const lockRef = db.collection("topup_active").doc("");
+  return db.runTransaction(async (tx) => {
+    const topupSnap = await tx.get(topupRef);
+    if (!topupSnap.exists) throw new HttpsError("not-found", "Catatan top-up tidak ditemukan.");
+    const item = topupSnap.data() || {};
+    if (!["CREATING", "CREATE_UNKNOWN"].includes(item.status) || item.reference || item.credited === true) {
+      throw new HttpsError("failed-precondition", "Hanya invoice yang belum memiliki reference dan masih berstatus tidak pasti yang dapat diselesaikan dengan prosedur ini.");
+    }
+    const userLockRef = db.collection("topup_active").doc(String(item.uid || ""));
+    const lockSnap = await tx.get(userLockRef);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.update(topupRef, {status: "CREATE_FAILED", resolvedBy: adminUid, resolutionReason: reason,
+      providerVerifiedNoInvoice: true, resolvedAt: now, updatedAt: now});
+    if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(userLockRef);
+    return {success: true, status: "CREATE_FAILED"};
+  });
+});
+
 function validSignature(raw, received, secret) {
   if (!raw || !received || !secret) return false;
   const expected = crypto.createHmac("sha256", secret).update(raw).digest();
