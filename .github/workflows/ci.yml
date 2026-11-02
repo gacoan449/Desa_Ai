@@ -24,6 +24,36 @@ jobs:
           java-version: "17"
       - name: Generate Android platform files
         run: flutter create --platforms=android --project-name desa_ai .
+      - name: Configure Google Services Gradle plugin
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          settings = Path("android/settings.gradle.kts")
+          source = settings.read_text()
+          if 'id("com.google.gms.google-services")' not in source:
+              source = source.replace('plugins {', 'plugins {\\n    id("com.google.gms.google-services") version "4.4.2" apply false', 1)
+          settings.write_text(source)
+          app = Path("android/app/build.gradle.kts")
+          source = app.read_text()
+          if 'id("com.google.gms.google-services")' not in source:
+              source = source.replace('plugins {', 'plugins {\\n    id("com.google.gms.google-services")', 1)
+          app.write_text(source)
+          PY
+      - name: Validate Firebase Android OAuth config
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("android/app/google-services.json").read_text())
+          if data["project_info"]["project_id"] != "desaai-dfe30":
+              raise SystemExit("Wrong Firebase project in google-services.json")
+          clients = data["client"]
+          if not any(c.get("client_info", {}).get("android_client_info", {}).get("package_name") == "com.desaai.app" for c in clients):
+              raise SystemExit("Android package com.desaai.app is missing")
+          if not any(o.get("client_type") == 3 for c in clients for o in c.get("oauth_client", [])):
+              raise SystemExit("OAuth Web client missing")
+          print("Firebase project, Android package, and OAuth Web client verified.")
+          PY
       - name: Set the registered Android application ID
         run: |
           python3 - <<'PY'
