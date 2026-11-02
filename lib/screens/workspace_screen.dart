@@ -446,6 +446,25 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _chat() {
     if (_configError != null && _config == null) return _error(_configError!);
     return Column(children: [
+      if (_config?['billingHold'] == true) Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF0EF),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFF4B8B2)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.lock_outline_rounded, color: Color(0xFFB42318), size: 20),
+          const SizedBox(width: 10),
+          const Expanded(child: Text(
+            'Penggunaan AI ditahan karena ada kewajiban pembayaran yang perlu diperiksa. Anda masih dapat membuka Saldo & top-up.',
+            style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF8D211A)),
+          )),
+          TextButton(onPressed: () => setState(() => _page = 'wallet'), child: const Text('Saldo')),
+        ]),
+      ),
       if (_contextTokens >= ((_config?['warningContextTokens'] as num?)?.toInt() ?? 12000)) Container(width: double.infinity, margin: const EdgeInsets.fromLTRB(18, 12, 18, 0), padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: const Color(0xFFFFF7E6), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF5D48C))),
         child: const Row(children: [Icon(Icons.warning_amber_rounded, color: Color(0xFF9A6700), size: 20), SizedBox(width: 10),
