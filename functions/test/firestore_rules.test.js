@@ -3,7 +3,6 @@
 const {readFileSync} = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const assert = require("node:assert/strict");
 const {initializeTestEnvironment, assertFails, assertSucceeds} = require("@firebase/rules-unit-testing");
 const {doc, getDoc, setDoc, updateDoc} = require("firebase/firestore");
 
