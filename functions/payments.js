@@ -289,7 +289,7 @@ exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxI
     if (!reference || !merchantRef) continue;
     try {
       const url = apiBase() + "/transaction/detail?reference=" + encodeURIComponent(reference);
-      const response = await fetch(url, {headers: {Authorization: "Bearer " + apiKey, Accept: "application/json},
+      const response = await fetch(url, {headers: {Authorization: "Bearer " + apiKey, "Accept": "application/json"},
         signal: AbortSignal.timeout(12000)});
       const body = await response.json().catch(() => ({}));
       const provider = body.data || {};
