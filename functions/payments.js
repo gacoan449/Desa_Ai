@@ -57,6 +57,26 @@ async function getChannels() {
     (safeInt(item.minimum_amount) || 0) <= MAX_TOPUP_IDR && (safeInt(item.maximum_amount) || 0) >= MIN_TOPUP_IDR);
 }
 
+async function markInvoiceCreationState(topupRef, activeRef, merchantRef, status, details = {}) {
+  await db.runTransaction(async (tx) => {
+    const [topupSnap, lockSnap] = await Promise.all([tx.get(topupRef), tx.get(activeRef)]);
+    if (!topupSnap.exists) return;
+    const current = topupSnap.data() || {};
+    const terminal = ["PAID", "FAILED", "EXPIRED", "REFUNDED", "REFUNDED_PARTIAL",
+      "REFUNDED_UNCREDITED", "REFUND_NEEDS_REVIEW"].includes(current.status);
+    if (terminal) {
+      if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(activeRef);
+      return;
+    }
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    tx.update(topupRef, {status, ...details, updatedAt: now});
+    if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) {
+      if (status === "CREATE_FAILED") tx.delete(activeRef);
+      else tx.set(activeRef, {status, updatedAt: now}, {merge: true});
+    }
+  });
+}
+
 exports.aiGetPaymentChannels = onCall({region: REGION, secrets: [TRIPAY_API_KEY], maxInstances: 5}, async (request) => {
   const uid = requireUid(request);
   await getUser(uid);
@@ -141,22 +161,18 @@ exports.aiCreateTopupPayment = onCall({
     created = await createdResponse.json().catch(() => ({}));
   } catch (error) {
     // A timeout can happen after the provider created the invoice. Keep the lock for reconciliation.
-    await topupRef.set({status: "CREATE_UNKNOWN", reconciliationReason: "Provider request outcome unknown.", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-    await activeRef.set({status: "CREATE_UNKNOWN", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_UNKNOWN",
+      {reconciliationReason: "Provider request outcome unknown."});
     throw new HttpsError("unavailable", "Status pembuatan tagihan belum pasti. Jangan membuat pembayaran ulang; hubungi bantuan untuk pemeriksaan.");
   }
   if (!createdResponse.ok && createdResponse.status >= 500) {
-    await topupRef.set({status: "CREATE_UNKNOWN", providerHttpStatus: createdResponse.status,
-      reconciliationReason: "Provider 5xx; invoice outcome is ambiguous.", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-    await activeRef.set({status: "CREATE_UNKNOWN", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_UNKNOWN",
+      {providerHttpStatus: createdResponse.status, reconciliationReason: "Provider 5xx; invoice outcome is ambiguous."});
     throw new HttpsError("unavailable", "Status pembuatan tagihan belum pasti. Jangan membuat pembayaran ulang; hubungi bantuan untuk pemeriksaan.");
   }
   if (!createdResponse.ok || created.success !== true || !created.data) {
-    await topupRef.set({status: "CREATE_FAILED", providerHttpStatus: createdResponse.status, updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-    await db.runTransaction(async (tx) => {
-      const lock = await tx.get(activeRef);
-      if (lock.exists && lock.data().merchantRef === merchantRef) tx.delete(activeRef);
-    });
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_FAILED",
+      {providerHttpStatus: createdResponse.status});
     logger.error("TriPay invoice creation failed", {status: createdResponse.status, merchantRef});
     throw new HttpsError("unavailable", "TriPay gagal membuat tagihan. Saldo belum ditambahkan.");
   }
@@ -164,8 +180,8 @@ exports.aiCreateTopupPayment = onCall({
   const totalAmount = safeInt(invoice.total_amount);
   const reference = clean(invoice.reference, 200);
   if (!reference || totalAmount === null || totalAmount < amount) {
-    await topupRef.set({status: "CREATE_UNKNOWN", reconciliationReason: "Provider returned incomplete invoice data.", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
-    await activeRef.set({status: "CREATE_UNKNOWN", updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    await markInvoiceCreationState(topupRef, activeRef, merchantRef, "CREATE_UNKNOWN",
+      {reconciliationReason: "Provider returned incomplete invoice data."});
     throw new HttpsError("unavailable", "Data invoice belum lengkap. Tagihan ditahan untuk pemeriksaan agar tidak terbuat ganda.");
   }
   const expiresAt = safeInt(invoice.expired_time) || (nowSeconds + 86400);
