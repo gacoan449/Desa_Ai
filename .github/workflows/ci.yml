@@ -43,7 +43,8 @@ jobs:
         run: flutter pub get
       - name: Analyze Dart
         run: flutter analyze --no-pub
-      - name: Require production release configuration
+      - name: Check production release configuration
+        id: release_config
         if: github.event_name != 'pull_request'
         env:
           DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
@@ -52,12 +53,12 @@ jobs:
           DESAAI_KEY_ALIAS: ${{ secrets.DESAAI_KEY_ALIAS }}
           DESAAI_KEY_PASSWORD: ${{ secrets.DESAAI_KEY_PASSWORD }}
         run: |
-          test -n "$DESAAI_API_BASE_URL" || { echo "Missing DESAAI_API_BASE_URL secret"; exit 1; }
+          if [ -z "$DESAAI_API_BASE_URL" ] || [ -z "$DESAAI_KEYSTORE_BASE64" ] || [ -z "$DESAAI_KEYSTORE_PASSWORD" ] || [ -z "$DESAAI_KEY_ALIAS" ] || [ -z "$DESAAI_KEY_PASSWORD" ]; then
+            echo "::warning::Release APK skipped. Configure DESAAI_API_BASE_URL and all four DESAAI signing secrets."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           case "$DESAAI_API_BASE_URL" in https://*) ;; *) echo "DESAAI_API_BASE_URL must use HTTPS"; exit 1 ;; esac
-          test -n "$DESAAI_KEYSTORE_BASE64" || { echo "Missing DESAAI_KEYSTORE_BASE64 secret"; exit 1; }
-          test -n "$DESAAI_KEYSTORE_PASSWORD" || { echo "Missing DESAAI_KEYSTORE_PASSWORD secret"; exit 1; }
-          test -n "$DESAAI_KEY_ALIAS" || { echo "Missing DESAAI_KEY_ALIAS secret"; exit 1; }
-          test -n "$DESAAI_KEY_PASSWORD" || { echo "Missing DESAAI_KEY_PASSWORD secret"; exit 1; }
           echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
           keytool -list -keystore android/app/desaai-release.jks -storepass "$DESAAI_KEYSTORE_PASSWORD" -alias "$DESAAI_KEY_ALIAS" >/dev/null
           cat > android/key.properties <<EOF
@@ -96,13 +97,14 @@ jobs:
               raise SystemExit("Could not bind release build to permanent signing key")
           gradle.write_text(source)
           PY
+          echo "configured=true" >> "$GITHUB_OUTPUT"
       - name: Build signed split release APKs
-        if: github.event_name != 'pull_request'
+        if: steps.release_config.outputs.configured == 'true'
         env:
           DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
         run: flutter build apk --release --split-per-abi --dart-define=DESA_AI_API_URL="$DESAAI_API_BASE_URL"
       - name: Verify release APK signatures
-        if: github.event_name != 'pull_request'
+        if: steps.release_config.outputs.configured == 'true'
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
@@ -111,7 +113,7 @@ jobs:
             "$APKSIGNER" verify --verbose --print-certs "$apk"
           done
       - name: Upload signed release APKs
-        if: github.event_name != 'pull_request'
+        if: steps.release_config.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: desa-ai-release-apks
