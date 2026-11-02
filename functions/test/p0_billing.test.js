@@ -11,7 +11,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
 if (!admin.apps.length) admin.initializeApp({projectId: "demo-desa-ai-p0"});
 
 const db = admin.firestore();
-const {reserveMessage} = require("../ai");
+const {reserveMessage} = require("../ai").__test;
 
 test("two concurrent AI reservations cannot overspend one account", async () => {
   const uid = "p0-" + crypto.randomUUID();
