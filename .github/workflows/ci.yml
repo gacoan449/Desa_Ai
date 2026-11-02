@@ -36,6 +36,21 @@ jobs:
           if namespace_count != 1 or app_count != 1:
               raise SystemExit("Could not set Android namespace/applicationId")
           gradle.write_text(source)
+          # Apply Firebase Google Services plugin to the generated Android scaffold.
+          settings = Path("android/settings.gradle.kts")
+          settings_source = settings.read_text()
+          if "com.google.gms.google-services" not in settings_source:
+              settings_source = settings_source.replace("plugins {", "plugins {\\n    id(\\\"com.google.gms.google-services\\\") version \\"4.4.2\\" apply false", 1)
+          settings.write_text(settings_source)
+          app_gradle = Path("android/app/build.gradle.kts")
+          app_source = app_gradle.read_text()
+          if "id(\\\"com.google.gms.google-services\\\")" not in app_source:
+              app_source = app_source.replace("plugins {", "plugins {\\n    id(\\\"com.google.gms.google-services\\\")", 1)
+          app_gradle.write_text(app_source)
+          import json
+          config = json.loads(Path("android/app/google-services.json").read_text())
+          if not any(x.get("client_info", {}).get("android_client_info", {}).get("package_name") == "com.desaai.app" for x in config.get("client", [])):
+              raise SystemExit("google-services.json does not contain Android package com.desaai.app")
           PY
       - name: Remove generated counter-app test
         run: rm -f test/widget_test.dart
