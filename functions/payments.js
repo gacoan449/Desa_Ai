@@ -330,7 +330,7 @@ exports.aiTripayCallback = onRequest({
       }
 
       if (["FAILED", "EXPIRED"].includes(status)) {
-        if (topup.status === "PAID" || topup.credited === true || ["REFUNDED", "REFUND_NEEDS_REVIEW"].includes(topup.status)) throw new Error("TERMINAL_STATE_CONFLICT");
+        if (topup.status === "PAID" || topup.credited === true || ["REFUNDED", "REFUNDED_PARTIAL", "REFUND_NEEDS_REVIEW"].includes(topup.status)) throw new Error("TERMINAL_STATE_CONFLICT");
         tx.update(topupRef, {reference: reference || null, amount: totalAmount, totalAmount, status, updatedAt: now});
         if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
         return {credited: false, status};
