@@ -11,7 +11,7 @@ app.use(cors({origin(origin, callback) {
 }, methods:["GET","POST","OPTIONS"], allowedHeaders:["Authorization","Content-Type","Accept","X-Callback-Signature","X-Callback-Event"]}));
 app.use(express.json({limit:"1mb",verify(req,_res,buffer){req.rawBody=Buffer.from(buffer);}}));
 app.get("/healthz",(_req,res)=>res.status(200).json({ok:true,service:"desa-ai-api"}));
-for (const name of ["aiGetConfig","aiCreateRoom","aiRenameRoom","aiDeleteRoom","aiGetPaymentChannels","aiCreateTopupPayment","aiAdminListPendingUsage","aiAdminRefundUnconfirmedUsage"]) app.post("/"+name,handlers[name]);
+for (const name of ["aiGetConfig","aiCreateRoom","aiRenameRoom","aiDeleteRoom","aiGetPaymentChannels","aiCreateTopupPayment","aiAdminListPendingUsage","aiAdminRefundUnconfirmedUsage","aiAdminListBillingObligations","aiAdminSettleBillingObligation"]) app.post("/"+name,handlers[name]);
 app.post("/aiChatStream",handlers.aiChatStream);
 app.post("/aiTripayCallback",handlers.aiTripayCallback);
 app.post("/_internal/reconcile",handlers.aiReconcilePending);
