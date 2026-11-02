@@ -63,13 +63,14 @@ test("billing snapshot keeps the original price when live config changes", () =>
     key: "economy", id: "test-model",
     inputUsdPerMillion: 1, outputUsdPerMillion: 2, cachedInputUsdPerMillion: 0.25
   };
-  const snapshot = {
-    modelKey: model.key, modelId: model.id,
-    inputUsdPerMillion: model.inputUsdPerMillion,
-    outputUsdPerMillion: model.outputUsdPerMillion,
-    cachedInputUsdPerMillion: model.cachedInputUsdPerMillion,
-    fxIdrPerUsd: 18000, retailMultiplier: 2.5, webSearchUsdPerCall: 0
-  };
+  const config = {fxIdrPerUsd: 18000, retailMultiplier: 2.5, webSearchUsdPerCall: 0};
+  const {billingSnapshot, calculateChargeIdr} = require("../ai").__test;
+  const snapshot = billingSnapshot(model, [], config);
+  // A later admin price/currency change must not mutate the saved request snapshot.
+  model.inputUsdPerMillion = 99;
+  model.outputUsdPerMillion = 99;
+  config.fxIdrPerUsd = 99000;
+  config.retailMultiplier = 9;
   const response = {
     usage: {input_tokens: 1000, output_tokens: 500, input_tokens_details: {cached_tokens: 200}},
     output: []
@@ -77,7 +78,6 @@ test("billing snapshot keeps the original price when live config changes", () =>
   const uncached = 800;
   const expectedUsd = (uncached * 1 + 200 * 0.25 + 500 * 2) / 1000000;
   const expectedIdr = Math.ceil(expectedUsd * 18000 * 2.5);
-  const {calculateChargeIdr} = require("../ai").__test;
   const result = calculateChargeIdr(response, snapshot, false);
   assert.equal(result.amountIdr, expectedIdr);
   assert.equal(result.inputTokens, 1000);
