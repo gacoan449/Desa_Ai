@@ -293,7 +293,7 @@ async function settle({uid, requestId, response, answer = "", forceRefund = fals
     tx.set(room, roomUpdate, {merge: true});
     if (underpayment > 0) {
       tx.create(obligation, {uid, requestId, roomId: current.roomId, model: current.model,
-        amountIdr: underpayment, status: "OPEN", source: "AI_PROVIDER_UNDERPAYMENT",
+        type: "AI_PROVIDER_UNDERPAYMENT", amountIdr: underpayment, status: "OPEN", source: "AI_PROVIDER_UNDERPAYMENT",
         providerCostUsd: usd, reservedAmountIdr: reserve, chargedAmountIdr: charge,
         createdAt: now, updatedAt: now});
       if (delta === 0) tx.update(userRef, {billingHold: true, billingHoldReason: "AI_PROVIDER_UNDERPAYMENT", updatedAt: now});
