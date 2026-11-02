@@ -387,8 +387,6 @@ exports.aiTripayCallback = onRequest({
   const ledgerRef = db.collection("balance_ledger").doc(ledgerId);
   const mutationRef = db.collection("mutasi_saldo").doc(ledgerId);
   const refundId = "tripay_refund_" + crypto.createHash("sha256").update(merchantRef).digest("hex");
-  const refundLedgerRef = db.collection("balance_ledger").doc(refundId);
-  const refundMutationRef = db.collection("mutasi_saldo").doc(refundId);
   const obligationRef = db.collection("ai_billing_obligations").doc(refundId);
   try {
     const result = await db.runTransaction(async (tx) => {
