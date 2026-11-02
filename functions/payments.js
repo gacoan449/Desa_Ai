@@ -271,7 +271,7 @@ exports.aiAdminResolveUnknownTopup = onCall({region: REGION, maxInstances: 3}, a
 exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxInstances: 2, secrets: [TRIPAY_API_KEY]}, async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({success: false});
   const expectedCron = String(process.env.CRON_SECRET || "");
-  const suppliedCron = String(req.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  const suppliedCron = String(req.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   const expectedBytes = Buffer.from(expectedCron);
   const suppliedBytes = Buffer.from(suppliedCron);
   if (!expectedCron || !suppliedCron || expectedBytes.length !== suppliedBytes.length ||
