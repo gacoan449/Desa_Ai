@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 const _green = Color(0xFF157A52);
@@ -43,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_busy) return;
     setState(() { _busy = true; _error = null; });
     try {
-      final googleUser = await GoogleSignIn(serverClientId: '295144083758-afasfbkh7i2qbsebg389nke2htk34p9s.apps.googleusercontent.com', scopes: const ['email']).signIn();
+      final googleUser = await GoogleSignIn(scopes: const ['email']).signIn();
       if (googleUser == null) {
         return;
       }
@@ -54,7 +55,20 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       final result = await FirebaseAuth.instance.signInWithCredential(credential);
       if (result.user != null) {
-        await _ensureProfile(result.user!);
+        try {
+          await _ensureProfile(result.user!);
+        } catch (_) {
+          await FirebaseAuth.instance.signOut();
+          rethrow;
+        }
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error.code == 'sign_in_failed' && error.message?.contains('10') == true
+              ? 'Google menolak konfigurasi aplikasi (DEVELOPER_ERROR 10). Package ID dan SHA-1 sertifikat APK harus cocok dengan Android OAuth di Firebase Console. Periksa juga Google Services Gradle plugin dan OAuth Web Client.'
+              : 'Google Sign-In gagal (' + error.code + '). Periksa konfigurasi OAuth Android dan koneksi internet.';
+        });
       }
     } on FirebaseAuthException catch (error) {
       if (mounted) {
