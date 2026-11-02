@@ -2,58 +2,91 @@
 
 Gunakan project Firebase staging dan kredensial TriPay sandbox terlebih dahulu. Jangan menguji debit/kredit pada akun produksi.
 
-## A. Pemeriksaan source
+## A. Konfigurasi wajib sebelum release build
+
+- [ ] `lib/firebase_options.dart` Android mengarah ke project `desaai-dfe30` dan package ID `com.desaai.app`.
+- [ ] Aktifkan Firebase Authentication > Google provider.
+- [ ] Pastikan Android app `com.desaai.app` terdaftar di Firebase.
+- [ ] Buat/ambil keystore permanen. Jika aplikasi pernah didistribusikan, gunakan upload key yang sesuai dengan konfigurasi Play Console; jangan membuat key baru sembarangan.
+- [ ] Daftarkan SHA-1 dan SHA-256 dari keystore permanen ke Firebase Console > Project settings > Android app.
+- [ ] Tambahkan GitHub Actions secrets: `DESAAI_API_BASE_URL`, `DESAAI_KEYSTORE_BASE64`, `DESAAI_KEYSTORE_PASSWORD`, `DESAAI_KEY_ALIAS`, `DESAAI_KEY_PASSWORD`.
+- [ ] `DESAAI_API_BASE_URL` harus URL HTTPS backend Express yang benar, tanpa `example.invalid`.
+- [ ] Jangan commit file keystore, key.properties, service-account JSON, .env, atau rahasia provider.
+- [ ] Simpan backup keystore dan password di dua tempat aman yang terpisah. Kehilangan signing key dapat menghambat pembaruan aplikasi.
+- [ ] Backend VPS harus menggunakan `GOOGLE_CLOUD_PROJECT=desaai-dfe30`, service account dengan izin minimum, `OPENAI_API_KEY`, kredensial TriPay, `PUBLIC_API_BASE_URL`, dan `CRON_SECRET`.
+
+Contoh membuat keystore baru untuk aplikasi yang belum pernah dirilis:
+
+```bash
+keytool -genkeypair -v -keystore desaai-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias desaai
+keytool -list -v -keystore desaai-release.jks -alias desaai
+```
+
+Encode file keystore menjadi satu baris Base64 sebelum memasukkannya ke secret `DESAAI_KEYSTORE_BASE64`. Jangan mengirim keystore atau password melalui chat.
+
+## B. Pemeriksaan source dan CI
 
 - [ ] `flutter pub get`
 - [ ] `flutter analyze`
-- [ ] `cd functions && npm install && node --check index.js && node --check ai.js && node --check payments.js && npm run lint`
-- [ ] Jalankan pemeriksaan Firestore Rules pada emulator/test suite sebelum deploy.
+- [ ] `cd functions && npm install && npm run check && npm run lint`
+- [ ] Jalankan `npm run test:emulator` melalui Firestore Emulator.
+- [ ] Dua reservasi saldo bersamaan tidak membuat saldo negatif atau ledger ganda.
 - [ ] Review semua perubahan GitHub dan pastikan tidak ada API secret di source, history, APK, atau log.
-- [ ] Pastikan `lib/firebase_options.dart` diganti dengan output `flutterfire configure`.
-- [ ] Generate Android/Web platform scaffold sebelum menjalankan build platform.
+- [ ] Pull request hanya menjalankan analyze; release APK hanya dibuat pada push/dispatch ketika URL backend dan signing secrets tersedia.
+- [ ] Pastikan APK release memakai `com.desaai.app` dan sertifikat permanen yang sama pada setiap build.
 
-## B. Autentikasi dan akun
+## C. Autentikasi dan akun
 
-- [ ] Registrasi email/password membuat profil dengan saldo tepat Rp0 dan role `user`.
-- [ ] Login/logout bekerja; sesi token kadaluarsa ditangani.
-- [ ] Google Sign-In diuji pada Android dan Web dengan OAuth IDs / SHA yang tepat.
+- [ ] Login Google diuji pada Android dengan SHA-1/SHA-256 keystore permanen.
+- [ ] Profil dibuat dengan saldo tepat Rp0 dan role `user`.
+- [ ] Login/logout bekerja; token kadaluarsa dan kegagalan provisioning profil ditangani.
 - [ ] Akun blocked/suspended gagal memanggil endpoint chat dan top-up.
-- [ ] Klien tidak bisa mengubah `users.balance`, ledger, usage, ruang chat, pesan, atau payment records.
-- [ ] Akun biasa tidak dapat memanggil fungsi admin rekonsiliasi.
+- [ ] Akun dengan `billingHold=true` tidak dapat memakai AI, tetapi tetap dapat melakukan top-up untuk menyelesaikan kewajiban.
+- [ ] Klien tidak bisa mengubah saldo, ledger, usage, ruang chat, pesan, atau payment records.
+- [ ] Akun biasa tidak dapat memanggil fungsi admin rekonsiliasi dan penyelesaian kewajiban.
 
-## C. Chat dan keamanan AI
+## D. Chat dan keamanan AI
 
-- [ ] Model ID aktif diverifikasi lewat API project; tarif input/output/cache diperiksa dengan halaman harga provider.
+- [ ] Model ID aktif dan tarif provider diverifikasi terhadap akun API aktual.
+- [ ] Snapshot harga input/output/cache, kurs, multiplier, dan biaya pencarian disimpan pada saat reservasi.
+- [ ] Perubahan tarif admin saat request berjalan tidak mengubah tarif transaksi yang sedang diproses.
 - [ ] Chat sukses: token stream sampai selesai, pesan assistant disimpan satu kali, usage final tercatat.
 - [ ] Saldo di bawah reservasi: request tidak masuk ke moderation/model dan saldo tidak berubah.
-- [ ] Moderasi memblokir input yang melanggar kebijakan dan kegagalan moderation menolak request.
+- [ ] Moderasi gagal: request ditolak sebelum dikirim ke model.
 - [ ] Rate limit maksimal 5 request per 10 detik diuji.
-- [ ] Dua request serentak tidak membuat saldo negatif atau ledger ganda.
 - [ ] Provider menolak request sebelum generasi: reservasi dikembalikan tepat satu kali.
 - [ ] Putus koneksi setelah provider menerima request: reservasi tidak langsung di-refund.
-- [ ] Request pending dengan response ID direkonsiliasi oleh job scheduler.
-- [ ] Pending tanpa response ID muncul di antrean admin; jangan refund sebelum verifikasi provider.
-- [ ] Refund manual admin memerlukan alasan audit, membuat satu kredit ledger/mutasi, dan membuka ruang yang tertahan.
-- [ ] Uji konteks 12.000 token (warning) dan 16.000 token (hard guard). Pastikan riwayat tertua dipangkas otomatis dan batas estimasi konservatif tidak mengirim konteks melewati reservasi.
+- [ ] Pending dengan response ID direkonsiliasi oleh job scheduler.
+- [ ] Pending tanpa response ID masuk antrean admin; jangan refund sebelum verifikasi provider.
+- [ ] Kekurangan biaya provider dicatat sebagai `ai_billing_obligations`, akun ditahan dari penggunaan AI, dan penyelesaian admin membuat debit ledger idempoten.
+- [ ] Refund manual admin memerlukan alasan audit dan bukti provider tidak menagih.
 
-## D. TriPay / keuangan
+## E. TriPay / keuangan
 
-- [ ] Daftar channel diambil dari akun merchant dan hanya channel aktif ditampilkan.
-- [ ] Invoice sukses menampilkan QR/payment code dan reference.
-- [ ] Callback sandbox sukses mengkredit nilai paket, bukan total fee yang dibayar pelanggan.
-- [ ] Signature tidak valid: callback ditolak tanpa kredit.
-- [ ] Amount/reference mismatch: callback ditolak tanpa kredit.
-- [ ] Callback PAID yang sama dikirim dua kali: hanya satu kredit.
+- [ ] Setiap invoice memiliki record `CREATING` dan lock per pengguna sebelum request dikirim ke provider.
+- [ ] Timeout atau HTTP 5xx saat pembuatan invoice menghasilkan `CREATE_UNKNOWN` dan tidak membuka invoice duplikat.
+- [ ] Invoice sukses disimpan sebagai `UNPAID` dengan reference, total amount, dan expiry.
+- [ ] Channel aktif dan batas minimum/maksimum divalidasi server.
+- [ ] Callback HMAC, reference, dan nominal diverifikasi.
+- [ ] Callback PAID berulang hanya mengkredit satu kali.
+- [ ] Callback REFUND setelah PAID membuat debit pembalikan idempoten.
+- [ ] Jika saldo tidak cukup untuk pembalikan refund, kewajiban dicatat dan penggunaan AI ditahan.
 - [ ] Callback FAILED/EXPIRED tidak mengkredit.
-- [ ] Callback setelah terminal state yang bertentangan ditinjau, bukan dikredit otomatis.
-- [ ] `TRIPAY_SANDBOX` tetap true sampai sandbox selesai.
-- [ ] Kurs FX, retail multiplier, model rates, fee tool, batas top-up Rp10.000–Rp10.000.000, limit konteks/output dan alert provider diset sebelum transaksi real.
+- [ ] Callback status terminal yang bertentangan ditolak untuk pemeriksaan.
+- [ ] `TRIPAY_SANDBOX=true` sampai seluruh tes sandbox selesai.
+- [ ] Rekonsiliasi transaksi provider dan ledger dilakukan sebelum transaksi real.
 
-## E. Release platform
+## F. Release platform
 
-- [ ] Generate platform native dan konfigurasi Firebase untuk target Android.
-- [ ] `flutter build apk --release` berhasil pada environment release.
+- [ ] Flutter analyze dan backend checks lulus.
+- [ ] Release APK dibangun dengan URL backend HTTPS dan signing permanen.
+- [ ] `apksigner verify` berhasil dan fingerprint sesuai Firebase OAuth.
 - [ ] Install dan uji APK pada perangkat fisik.
-- [ ] Uji jaringan lambat, lifecycle app, orientation, streaming, keyboard/composer, navigation drawer dan history.
+- [ ] Uji jaringan lambat, lifecycle app, streaming, keyboard/composer, navigasi, dan riwayat.
 - [ ] Verifikasi log tidak berisi token ID, prompt sensitif, secret, PIN, atau data pembayaran berlebih.
-- [ ] Lakukan review legal/privacy dan backup data sebelum public launch.
+- [ ] Review legal/privacy, penghapusan data, dan backup sebelum public launch.
+
+## G. Endpoint admin baru
+
+- `POST /aiAdminListBillingObligations` — daftar kewajiban terbuka.
+- `POST /aiAdminSettleBillingObligation` — selesaikan kewajiban setelah saldo cukup; wajib menyertakan alasan audit minimal 20 karakter.
