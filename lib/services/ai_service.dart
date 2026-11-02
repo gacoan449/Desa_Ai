@@ -132,6 +132,12 @@ class AiService {
     }
 
     await for (final line in response.stream
+        .timeout(
+          const Duration(seconds: 75),
+          onTimeout: (sink) => sink.addError(
+            TimeoutException('Respons AI terhenti lebih dari 75 detik. Status transaksi perlu diperiksa sebelum mengirim ulang.'),
+          ),
+        )
         .transform(utf8.decoder)
         .transform(const LineSplitter())) {
       if (!line.startsWith('data:')) continue;
