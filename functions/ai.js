@@ -707,3 +707,7 @@ exports.aiReconcilePending = onSchedule({
     } catch (err) { logger.warn("AI reconciliation retry failed", {requestId: item.requestId, message: err.message}); }
   }
 });
+
+
+// Test-only exports used by the Firestore Emulator concurrency suite.
+exports.__test = {reserveMessage, settle, billingSnapshot, calculateChargeIdr, usageRef};
