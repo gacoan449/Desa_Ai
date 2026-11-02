@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   flutter:
-    name: Flutter analyze and Android release APK
+    name: Flutter analyze and signed split release APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,41 +64,6 @@ jobs:
           if-no-files-found: error
       - name: Analyze Dart
         run: flutter analyze --no-pub
-      - name: Prepare stable Android debug signing key
-        run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android -alias androiddebugkey -keypass android \
-              -dname "CN=Android Debug,O=Android,C=US" \
-              -keyalg RSA -keysize 2048 -validity 10000
-          fi
-      - name: Build installable Android debug APK
-        env:
-          DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
-        run: |
-          flutter build apk --debug --dart-define=DESA_AI_API_URL="$DESAAI_API_BASE_URL"
-          mkdir -p build/diagnostics
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey > build/diagnostics/debug-signing.txt
-          grep -E 'SHA1:|SHA256:' build/diagnostics/debug-signing.txt > build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
-          grep -q 'SHA1:' build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
-          grep -q 'SHA256:' build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
-          sed 's/^/Debug APK /' build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
-      - name: Upload installable debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: desa-ai-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
-      - name: Upload Google Sign-In debug fingerprints
-        uses: actions/upload-artifact@v4
-        with:
-          name: desa-ai-debug-signing-fingerprints
-          path: build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
-          if-no-files-found: error
-          retention-days: 14
       - name: Check production release configuration
         id: release_config
         if: github.event_name != 'pull_request'
@@ -110,9 +75,8 @@ jobs:
           DESAAI_KEY_PASSWORD: ${{ secrets.DESAAI_KEY_PASSWORD }}
         run: |
           if [ -z "$DESAAI_API_BASE_URL" ] || [ -z "$DESAAI_KEYSTORE_BASE64" ] || [ -z "$DESAAI_KEYSTORE_PASSWORD" ] || [ -z "$DESAAI_KEY_ALIAS" ] || [ -z "$DESAAI_KEY_PASSWORD" ]; then
-            echo "::warning::Release APK skipped. Configure DESAAI_API_BASE_URL and all four DESAAI signing secrets."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::Release APK cannot be built. Configure DESAAI_API_BASE_URL, DESAAI_KEYSTORE_BASE64, DESAAI_KEYSTORE_PASSWORD, DESAAI_KEY_ALIAS, and DESAAI_KEY_PASSWORD."
+            exit 1
           fi
           case "$DESAAI_API_BASE_URL" in https://*) ;; *) echo "DESAAI_API_BASE_URL must use HTTPS"; exit 1 ;; esac
           echo "$DESAAI_KEYSTORE_BASE64" | base64 --decode > android/app/desaai-release.jks
