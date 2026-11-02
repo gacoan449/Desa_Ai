@@ -169,12 +169,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             _scrollToEnd();
             break;
           case 'final':
+            final underpayment = (event['underpaymentIdr'] as num?)?.toInt() ?? 0;
             setState(() {
               _lastCharge = (event['chargedAmountIdr'] as num?)?.toInt() ?? 0;
               _lastTokens = (event['totalTokens'] as num?)?.toInt() ?? 0;
               _draft = '';
               _busy = false;
             });
+            if (underpayment > 0) {
+              _notify('Ada kekurangan biaya provider ${_money(underpayment)}. Penggunaan AI ditahan sampai pemeriksaan admin selesai.', error: true);
+              _loadConfig();
+            }
             break;
           case 'pending':
             _notify(event['message']?.toString() ?? 'Pemakaian sedang direkonsiliasi.');
@@ -188,7 +193,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       }
       if (mounted && _busy) setState(() { _draft = ''; _busy = false; });
     } catch (e) {
-      if (mounted) { setState(() { _draft = ''; _busy = false; }); _notify(e.toString(), error: true); }
+      if (mounted) {
+        setState(() { _draft = ''; _busy = false; });
+        _notify(e.toString(), error: true);
+        _loadConfig();
+      }
     }
   }
 
