@@ -293,8 +293,11 @@ exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxI
         signal: AbortSignal.timeout(12000)});
       const body = await response.json().catch(() => ({}));
       const provider = body.data || {};
+      const providerAmount = safeInt(provider.amount);
+      const providerFee = safeInt(provider.fee_customer) || 0;
+      const detailTotal = safeInt(provider.total_amount) || (providerAmount === null ? null : providerAmount + providerFee);
       if (!response.ok || body.success !== true || provider.reference !== reference ||
-          provider.merchant_ref !== merchantRef || safeInt(provider.total_amount) !== safeInt(item.totalAmount)) {
+          provider.merchant_ref !== merchantRef || detailTotal !== safeInt(item.totalAmount)) {
         results.push({merchantRef, outcome: "MISMATCH_OR_UNAVAILABLE"});
         continue;
       }
@@ -326,8 +329,8 @@ exports.aiReconcileTopups = onRequest({region: REGION, timeoutSeconds: 120, maxI
           tx.create(mutationRef, {uid: current.uid, tipe: "MASUK", nominal: amount, saldoAwal: before, saldoAkhir: after,
             keterangan: "Rekonsiliasi top-up Desa AI via TriPay", sumber: "AI_TOPUP_TRIPAY_RECONCILIATION",
             merchantRef, reference, waktu: now});
-          tx.update(doc.ref, {status: "PAID", credited: true, creditedAmount: amount, totalAmount: safeInt(provider.total_amount),
-            amount: safeInt(provider.total_amount), paidAt: now, reconciledAt: now, updatedAt: now});
+          tx.update(doc.ref, {status: "PAID", credited: true, creditedAmount: amount, totalAmount: detailTotal,
+            amount: detailTotal, paidAt: now, reconciledAt: now, updatedAt: now});
           if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
           return "CREDITED";
         });
