@@ -306,7 +306,7 @@ exports.aiTripayCallback = onRequest({
       }
 
       if (status === "REFUND") {
-        if (["REFUNDED", "REFUNDED_UNCREDITED"].includes(topup.status)) return {alreadyRefunded: true};
+        if (["REFUNDED", "REFUNDED_PARTIAL", "REFUNDED_UNCREDITED"].includes(topup.status)) return {alreadyRefunded: true};
         if (topup.status === "REFUND_NEEDS_REVIEW") return {alreadyPendingReview: true};
         if (topup.status !== "PAID" || topup.credited !== true) {
           tx.update(topupRef, {reference, amount: totalAmount, totalAmount, status: "REFUNDED_UNCREDITED",
@@ -314,30 +314,19 @@ exports.aiTripayCallback = onRequest({
           if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
           return {credited: false, refunded: false, status: "REFUNDED_UNCREDITED"};
         }
-        if (!userSnap.exists) throw new Error("USER_NOT_FOUND");
         const creditAmount = safeInt(topup.creditedAmount || topup.creditAmount || topup.packageAmount);
-        const before = safeInt((userSnap.data() || {}).balance);
-        if (!creditAmount || before === null || before < 0) throw new Error("BALANCE_INVALID");
-        if (before < creditAmount) {
-          tx.create(obligationRef, {uid, type: "TRIPAY_REFUND", sourceId: merchantRef, amountIdr: creditAmount,
-            status: "OPEN", reason: "Provider me-refund pembayaran setelah saldo top-up dikreditkan.",
-            createdAt: now, updatedAt: now});
-          tx.update(userRef, {billingHold: true, billingHoldReason: "REFUND_NEEDS_REVIEW", updatedAt: now});
-          tx.update(topupRef, {status: "REFUND_NEEDS_REVIEW", refundAmount: creditAmount,
-            refunded: false, refundPending: true, updatedAt: now});
-          if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
-          return {credited: true, refunded: false, needsReview: true, amountIdr: creditAmount};
-        }
-        const after = before - creditAmount;
-        tx.update(userRef, {balance: after, updatedAt: now});
-        tx.create(refundLedgerRef, {uid, type: "DEBIT", amount: creditAmount, before, after,
-          reason: "Pembalikan top-up setelah refund TriPay", source: "AI_TOPUP_TRIPAY_REFUND", merchantRef, reference, createdAt: now});
-        tx.create(refundMutationRef, {uid, tipe: "KELUAR", nominal: creditAmount, saldoAwal: before, saldoAkhir: after,
-          keterangan: "Pembalikan top-up setelah refund TriPay", sumber: "AI_TOPUP_TRIPAY_REFUND", merchantRef, reference, waktu: now});
-        tx.update(topupRef, {status: "REFUNDED", refundAmount: creditAmount, refunded: true,
-          refundedAt: now, refundedSaldoAwal: before, refundedSaldoAkhir: after, updatedAt: now});
+        if (!userSnap.exists || !creditAmount || creditAmount < 1) throw new Error("REFUND_AMOUNT_INVALID");
+        // TriPay's callback supplies the original total_amount but no dedicated refund_amount.
+        // Never debit a guessed amount: require an admin to verify the actual refund with the provider.
+        tx.create(obligationRef, {uid, type: "TRIPAY_REFUND", sourceId: merchantRef,
+          amountIdr: creditAmount, maxRefundAmountIdr: creditAmount, amountVerified: false,
+          status: "OPEN", reason: "TriPay mengirim status REFUND; nominal refund harus diverifikasi di dashboard provider.",
+          createdAt: now, updatedAt: now});
+        tx.update(userRef, {billingHold: true, billingHoldReason: "TRIPAY_REFUND_REVIEW", updatedAt: now});
+        tx.update(topupRef, {status: "REFUND_NEEDS_REVIEW", refundAmount: null,
+          refundMaximumAmount: creditAmount, refunded: false, refundPending: true, updatedAt: now});
         if (lockSnap.exists && lockSnap.data().merchantRef === merchantRef) tx.delete(lockRef);
-        return {credited: true, refunded: true, amountIdr: creditAmount};
+        return {credited: true, refunded: false, needsReview: true, maxAmountIdr: creditAmount};
       }
 
       if (["FAILED", "EXPIRED"].includes(status)) {
