@@ -3,6 +3,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const admin = require("firebase-admin");
+if (!admin.apps.length) admin.initializeApp({projectId: "demo-desa-ai-p1"});
 const {validSignature, clean, safeInt} = require("../payments").__test;
 const {billingSnapshot, calculateChargeIdr} = require("../ai").__test;
 
