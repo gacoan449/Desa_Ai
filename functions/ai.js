@@ -326,7 +326,10 @@ exports.aiGetConfig = onCall({region: REGION}, async (request) => {
   const account = await activeAccount(uid);
   const config = await pricing();
   return {
-    balance: safeInt(account.data.balance) || 0, minBalanceIdr: config.minBalanceIdr,
+    balance: safeInt(account.data.balance) || 0,
+    billingHold: account.data.billingHold === true,
+    billingHoldReason: text(account.data.billingHoldReason, 100),
+    minBalanceIdr: config.minBalanceIdr,
     maxContextTokens: MAX_CONTEXT_TOKENS, warningContextTokens: WARNING_CONTEXT_TOKENS,
     maxOutputTokens: config.maxOutputTokens,
     models: Object.values(config.models).filter((m) => m.active).map((m) => modelPublic(m, config)),
