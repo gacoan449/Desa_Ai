@@ -64,8 +64,29 @@ jobs:
           if-no-files-found: error
       - name: Analyze Dart
         run: flutter analyze --no-pub
-      - name: Compile Android debug APK
-        run: flutter build apk --debug --dart-define=DESA_AI_API_URL=https://api.invalid.local
+      - name: Build installable Android debug APK
+        env:
+          DESAAI_API_BASE_URL: ${{ secrets.DESAAI_API_BASE_URL }}
+        run: |
+          flutter build apk --debug --dart-define=DESA_AI_API_URL="$DESAAI_API_BASE_URL"
+          mkdir -p build/diagnostics
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey > build/diagnostics/debug-signing.txt
+          awk -F': ' '/SHA1:/{print "Debug APK SHA-1: " $2} /SHA256:/{print "Debug APK SHA-256: " $2}' build/diagnostics/debug-signing.txt > build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+          cat build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: desa-ai-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Google Sign-In debug fingerprints
+        uses: actions/upload-artifact@v4
+        with:
+          name: desa-ai-debug-signing-fingerprints
+          path: build/diagnostics/GOOGLE_SIGN_IN_FINGERPRINTS.txt
+          if-no-files-found: error
+          retention-days: 14
       - name: Check production release configuration
         id: release_config
         if: github.event_name != 'pull_request'
