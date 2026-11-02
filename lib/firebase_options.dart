@@ -1,32 +1,26 @@
-// Generated Firebase options placeholder.
-// Run "flutterfire configure --project PROJECT_ID" to replace this file with your real project values.
-// Firebase client options are not server secrets; never place OpenAI/TriPay private keys here.
+// Firebase client configuration for the Desa AI Android app.
+// These values identify the Firebase app; keep OpenAI and TriPay secrets on the server.
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
-    if (kIsWeb) return web;
+    if (kIsWeb) {
+      throw UnsupportedError('Firebase Web options have not been configured for Desa AI.');
+    }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
       default:
-        throw UnsupportedError('Desa AI is configured for Android and Web. Run FlutterFire configure for another platform.');
+        throw UnsupportedError('Desa AI is configured for Android only.');
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_FIREBASE_WEB_API_KEY',
-    appId: '1:000000000000:web:replace_me',
-    messagingSenderId: '000000000000',
-    projectId: 'replace-with-firebase-project-id',
-    authDomain: 'replace-with-firebase-project-id.firebaseapp.com',
-  );
-
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_FIREBASE_ANDROID_API_KEY',
-    appId: '1:000000000000:android:replace_me',
-    messagingSenderId: '000000000000',
-    projectId: 'replace-with-firebase-project-id',
+    apiKey: 'AIzaSyCCoStDl2BPu2WapQI8WWXm5NEKwRmVDko',
+    appId: '1:295144083758:android:f73fff4b4d7fc8ef7feabf',
+    messagingSenderId: '295144083758',
+    projectId: 'desaai-dfe30',
+    storageBucket: 'desaai-dfe30.firebasestorage.app',
   );
 }
