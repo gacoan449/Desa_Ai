@@ -5,10 +5,10 @@ Gunakan project Firebase staging dan kredensial TriPay sandbox terlebih dahulu. 
 ## A. Konfigurasi wajib sebelum release build
 
 - [ ] `lib/firebase_options.dart` Android mengarah ke project `desaai-dfe30` dan package ID `com.desaai.app`.
-- [ ] Aktifkan Firebase Authentication > Google provider.
+- [ ] Aktifkan Firebase Authentication > Sign-in method > Email/Password.
 - [ ] Pastikan Android app `com.desaai.app` terdaftar di Firebase.
 - [ ] Buat/ambil keystore permanen. Jika aplikasi pernah didistribusikan, gunakan upload key yang sesuai dengan konfigurasi Play Console; jangan membuat key baru sembarangan.
-- [ ] Daftarkan SHA-1 dan SHA-256 dari keystore permanen ke Firebase Console > Project settings > Android app. Client OAuth Web untuk Google Sign-In sudah ditentukan eksplisit pada aplikasi; fingerprint Android tetap harus cocok.
+- [ ] Pastikan konfigurasi Firebase Android dan package `com.desaai.app` benar. Login Email/Password tidak memerlukan OAuth client Google atau SHA-1 khusus untuk Google Sign-In.
 - [ ] Tambahkan GitHub Actions secrets: `DESAAI_API_BASE_URL`, `DESAAI_KEYSTORE_BASE64`, `DESAAI_KEYSTORE_PASSWORD`, `DESAAI_KEY_ALIAS`, `DESAAI_KEY_PASSWORD`.
 - [ ] `DESAAI_API_BASE_URL` harus URL HTTPS backend Express yang benar, tanpa `example.invalid`.
 - [ ] Jangan commit file keystore, key.properties, service-account JSON, .env, atau rahasia provider.
@@ -40,8 +40,9 @@ Encode file keystore menjadi satu baris Base64 sebelum memasukkannya ke secret `
 ## C. Autentikasi dan akun
 
 - [ ] Google Services Gradle plugin memproses `android/app/google-services.json`; package harus `com.desaai.app`.
-- [ ] SHA-1 sertifikat APK yang dipakai harus tercantum pada OAuth Android client di `google-services.json`; pipeline release memvalidasi fingerprint sebelum build.
-- [ ] Login Google diuji pada Android dengan SHA-1/SHA-256 keystore permanen.
+- [ ] Firebase Authentication Email/Password aktif.
+- [ ] Uji daftar akun, login, logout, validasi email/password, profil saldo awal Rp0, dan penanganan akun yang sudah terdaftar.
+- [ ] Tombol “Lupa password? Hubungi Admin” membuka WhatsApp admin di nomor yang ditetapkan.
 - [ ] Profil dibuat dengan saldo tepat Rp0 dan role `user`.
 - [ ] Login/logout bekerja; token kadaluarsa dan kegagalan provisioning profil ditangani. Jika provisioning gagal, sesi Auth dibatalkan agar AuthGate tidak terjebak pada profil kosong.
 - [ ] Akun blocked/suspended gagal memanggil endpoint chat dan top-up.
